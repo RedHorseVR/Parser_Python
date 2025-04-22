@@ -4,9 +4,12 @@ rem TO VIEW AS FLOW YOU WILL NEED TO OBTAIN VFC2000.exe
 rem EMAIL luis.r.lopez@outlook.com for access or check for a GitHub.com/RedhorseVR/VFCode open version
 rem NEED TO SET VFCTOOLPATH and COMMENTPARSERPATH to where you have the tools 
 
+@echo off
+set BAT_FILE_PATH=%~dp0
+echo The absolute path of this batch file is: %BAT_FILE_PATH%
 
-SET VFCTOOLPATH=E:\Users\luisr\OneDrive\VFC1.0
-SET COMMENTPARSERPATH=C:\Users\luisr\pyCommentParser
+SET VFCTOOLPATH=C:\VFC1.0
+SET COMMENTPARSERPATH=%BAT_FILE_PATH%
 
 
 python %COMMENTPARSERPATH%\pyCommentParser.py %1
