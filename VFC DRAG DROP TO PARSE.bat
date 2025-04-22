@@ -1,6 +1,7 @@
 rem DRAG DROP TO PARSE AND MAKE BACKUP FOR CODE FILE 
-rem MUST BE VALID PYTHON TO WORK - NO SYSNTAX ERRORS 
-rem TO VIEW NEED TO OBTAIN VFC2000.exe (EMAIL luis.r.lopez@outlook.com for access or check GitHub.com/RedhorseVR for open source from VFCode
+rem MUST BE VALID PYTHON TO WORK - NO SYNTAX ERRORS 
+rem TO VIEW AS FLOW YOU WILL NEED TO OBTAIN VFC2000.exe 
+rem (EMAIL luis.r.lopez@outlook.com for access or check GitHub.com/RedhorseVR/VFCode open version
 rem NEED TO SET VFCTOOLPATH and COMMENTPARSERPATH to where you have the tools 
 
 
