@@ -1,6 +1,6 @@
 # 🌀 Self-Grokking Python Parser
 
-> Built in on evening with the help of Claude and VFCode - A parser that parses itself to understand and visualize its own structure — using AST logic, structural comments, and flow graph generation.
+> Built in one evening with the help of Claude and VFCode - A parser that parses itself to understand and visualize its own structure — using AST logic, structural comments, and flow graph generation.
 
 ---
 
