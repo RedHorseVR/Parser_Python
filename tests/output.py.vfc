@@ -1,0 +1,406 @@
+set(import ast );// 
+set(import os );// 
+set(import sys );// 
+set(from typing import List, Dict, Set, Optional, Tuple, Any );// 
+set(from collections import defaultdict );// 
+set( );// 
+set( );// 
+input(class CompleteStructureCommenter: );// beginclass #beginclass
+set("""A more robust Python structure commenter that handles multi-block endings.""" );// 
+set( );// 
+input(def __init__(self): );// beginmethod #beginmethod
+set(self.source_lines = [] );// 
+set(self.result_lines = [] );// 
+set(self.begin_comments = {} );//  Line -> [comments]
+set(self.end_comments = defaultdict(list) );//  Line -> [(comment, indentation, start_line)]
+end( );// endmethod
+end( );// endmethod
+set( );// 
+input(def add_comments(self, filename: str, output_filename: Optional[str] = None) -> str: );// beginmethod #beginmethod
+set("""Add structural comments to a Python file.""" );// 
+set( );//  Read the file
+branch(with open(filename, 'r', encoding='utf-8') as f: );// beginwith #beginwith
+path();//
+set(content = f.read() );// 
+bend( );// endwith
+bend( );// endwith
+set( );// 
+set(return self.add_comments_to_string(content, output_filename) );// 
+end( );// endmethod
+end( );// endmethod
+set( );// 
+input(def add_comments_to_string(self, content: str, output_filename: Optional[str] = None) -> str: );// beginmethod #beginmethod
+set("""Add structural comments to a Python string.""" );// 
+set( );//  Parse the content
+set(self.source_lines = content.splitlines() );// 
+set( );// 
+set( );//  Parse the AST
+branch(try: );// begintry #begintry
+path();//
+set(tree = ast.parse(content) );// 
+path(except SyntaxError as e: );// 
+set(print(f"Syntax error in input file: {e}") );// 
+set(return content );// 
+bend( );// endtry
+bend( );// endtry
+set( );// 
+set( );//  First pass: collect all the begin/end comments
+set(self._collect_comments(tree) );// 
+set( );// 
+set( );//  Second pass: apply the comments to the source lines
+set(self._apply_comments() );// 
+set( );// 
+set( );//  Create the modified content
+set(modified_content = '\n'.join(self.result_lines) );// 
+set( );// 
+set( );//  Write to output file if provided
+branch(if output_filename: );// beginif #beginif
+path();//
+branch(with open(output_filename, 'w', encoding='utf-8') as f: );// beginwith #beginwith
+path();//
+set(f.write(modified_content) );// 
+bend( );// endwith
+bend( );// endif
+bend( );// endwith
+bend( );// endif
+set( );// 
+set(return modified_content );// 
+end( );// endmethod
+end( );// endmethod
+set( );// 
+input(def _get_indent(self, line_idx: int) -> str: );// beginmethod #beginmethod
+set("""Get the indentation of a line.""" );// 
+branch(if line_idx < 0 or line_idx >= len(self.source_lines): );// beginif #beginif
+path();//
+set(return "" );// 
+bend( );// endif
+bend( );// endif
+set(line = self.source_lines[line_idx] );// 
+set(return line[:len(line) - len(line.lstrip())] );// 
+end( );// endmethod
+end( );// endmethod
+set( );// 
+input(def _collect_comments_for_node(self, node, node_type, begin_comment, end_comment): );// beginmethod #beginmethod
+set("""Collect begin and end comments for a specific node.""" );// 
+branch(if not hasattr(node, 'lineno') or not hasattr(node, 'end_lineno'): );// beginif #beginif
+path();//
+set(return );// 
+bend( );// endif
+bend( );// endif
+set( );// 
+set(start_line = node.lineno - 1 );// 
+set(end_line = node.end_lineno - 1 );// 
+set(indent = self._get_indent(start_line) );// 
+set( );// 
+set( );//  Add begin comment
+branch(if start_line not in self.begin_comments: );// beginif #beginif
+path();//
+set(self.begin_comments[start_line] = [] );// 
+bend( );// endif
+bend( );// endif
+set(self.begin_comments[start_line].append(begin_comment) );// 
+set( );// 
+set( );//  Add end comment - store as (comment, indentation, start_line)
+set( );//  The start_line is used for sorting end comments when multiple blocks end on the same line
+set(self.end_comments[end_line].append((end_comment, indent, start_line)) );// 
+end( );// endmethod
+end( );// endmethod
+set( );// 
+input(def _collect_comments(self, tree): );// beginmethod #beginmethod
+set("""First pass: collect all the begin/end comments.""" );// 
+set( );//  Clear previous comments
+set(self.begin_comments = {} );// 
+set(self.end_comments = defaultdict(list) );// 
+set( );// 
+set( );//  Build a mapping of nodes to their parent
+set(parent_map = {} );// 
+loop(for parent in ast.walk(tree): );// beginfor #beginfor
+loop(for child in ast.iter_child_nodes(parent): );// beginfor #beginfor
+set(parent_map[child] = parent );// 
+lend( );// endfor
+lend( );// endfor
+lend( );// endfor
+lend( );// endfor
+set( );// 
+set( );//  Collect comments from all nodes in AST order
+loop(for node in ast.walk(tree): );// beginfor #beginfor
+set( );//  Function definitions
+branch(if isinstance(node, ast.FunctionDef): );// beginif #beginif
+path();//
+set( );//  Check if this is a method inside a class
+set(parent = parent_map.get(node) );// 
+branch(if parent and isinstance(parent, ast.ClassDef): );// beginif #beginif
+path();//
+set(self._collect_comments_for_node(node, "method", " );// beginmethod", "#endmethod")
+path(else: );// 
+set(self._collect_comments_for_node(node, "function", " );// beginfunc", "#endfunc")
+bend( );// endif
+bend( );// endif
+set( );// 
+set( );//  Class definitions
+path(elif isinstance(node, ast.ClassDef): );// beginif #beginif
+set(self._collect_comments_for_node(node, "class", " );// beginclass", "#endclass")
+set( );// 
+set( );//  If statements
+path(elif isinstance(node, ast.If): );// beginif #beginif
+set(self._collect_comments_for_node(node, "if", " );// beginif", "#endif")
+set( );// 
+set( );//  For loops
+path(elif isinstance(node, ast.For): );// beginif #beginif
+set(self._collect_comments_for_node(node, "for", " );// beginfor", "#endfor")
+set( );// 
+set( );//  While loops
+path(elif isinstance(node, ast.While): );// beginif #beginif
+set(self._collect_comments_for_node(node, "while", " );// beginwhile", "#endwhile")
+set( );// 
+set( );//  With statements
+path(elif isinstance(node, ast.With): );// beginif #beginif
+set(self._collect_comments_for_node(node, "with", " );// beginwith", "#endwith")
+set( );// 
+set( );//  Try-except blocks
+path(elif isinstance(node, ast.Try): );// beginif #beginif
+set(self._collect_comments_for_node(node, "try", " );// begintry", "#endtry")
+bend( );// endif
+bend( );// endif
+bend( );// endif
+bend( );// endif
+bend( );// endif
+bend( );// endif
+bend( );// endif
+lend( );// endfor
+end( );// endmethod
+bend( );// endif
+bend( );// endif
+bend( );// endif
+bend( );// endif
+bend( );// endif
+bend( );// endif
+bend( );// endif
+lend( );// endfor
+end( );// endmethod
+set( );// 
+input(def _apply_comments(self): );// beginmethod #beginmethod
+set("""Second pass: apply the comments to the source lines.""" );// 
+set(self.result_lines = [] );// 
+set( );// 
+set( );//  Process each line
+loop(for i, line in enumerate(self.source_lines): );// beginfor #beginfor
+set( );//  First add the original line (possibly with begin comments)
+branch(if i in self.begin_comments: );// beginif #beginif
+path();//
+set( );//  Need to add begin comments
+set(begin_comments = self.begin_comments[i] );// 
+set( );// 
+set( );//  Check if line already has a comment
+branch(if ' );// beginif #beginif #' in line and not line.strip().startswith('#'):
+path();//
+set( );//  Parse out existing comment
+set(comment_pos = line.find(' );// ')
+set(code_part = line[:comment_pos].rstrip() );// 
+set(existing_comment = line[comment_pos:] );// 
+set( );// 
+set( );//  Add our begin comments before the existing comment
+set(begin_comment_str = " ".join(begin_comments) );// 
+set(modified = f"{code_part} {begin_comment_str} {existing_comment}" );// 
+set(self.result_lines.append(modified) );// 
+path(else: );// 
+set( );//  No existing comment, add to end
+set(begin_comment_str = " ".join(begin_comments) );// 
+set(self.result_lines.append(f"{line} {begin_comment_str}") );// 
+bend( );// endif
+bend( );// endif
+path(else: );// 
+set( );//  No begin comment to add
+set(self.result_lines.append(line) );// 
+bend( );// endif
+bend( );// endif
+set( );// 
+set( );//  Then check if we need to add end comments after this line
+branch(if i in self.end_comments: );// beginif #beginif
+path();//
+set( );//  Sort end comments by their start line - this ensures proper nesting
+set( );//  Blocks that started later (higher start_line) should be closed first
+set(sorted_end_comments = sorted( );// 
+set(self.end_comments[i], );// 
+set(key=lambda x: x[2], );//  Sort by start_line
+set(reverse=True );//  Later blocks should be closed first
+set() );// 
+set( );// 
+set( );//  Add each end comment on its own line
+loop(for end_comment, indent, _ in sorted_end_comments: );// beginfor #beginfor
+set(self.result_lines.append(f"{indent}{end_comment}") );// 
+lend( );// endfor
+bend( );// endif
+lend( );// endfor
+end( );// endmethod
+end( );// endclass
+lend( );// endfor
+bend( );// endif
+lend( );// endfor
+end( );// endmethod
+end( );// endclass
+set( );// 
+set(Ends = [ );// 
+set("endfunc", );// 
+set("endmethod", );// 
+set("endclass", );// 
+set("endif", );// 
+set("endwith", );// 
+set("endtry", );// 
+set("endfor", );// 
+set("endwhile", );// 
+set(] );// 
+set( );// 
+set(Begins = [ );// 
+set("beginfunc", );// 
+set("beginmethod", );// 
+set("beginclass", );// 
+set("beginif", );// 
+set("begintry", );// 
+set("beginwith", );// 
+set("beginwhile", );// 
+set("beginfor", );// 
+set(] );// 
+set( );// 
+set(begin_type = { );// 
+set("beginfunc": "input", );// 
+set("beginmethod": "input", );// 
+set("beginclass": "input", );// 
+set("beginif": "branch", );// 
+set("begintry": "branch", );// 
+set("beginwith": "branch", );// 
+set("beginwhile": "loop", );// 
+set("beginfor": "loop", );// 
+set(} );// 
+set( );// 
+set(end_type = { );// 
+set("endfunc": "end", );// 
+set("endmethod": "end", );// 
+set("endclass": "end", );// 
+set("endif": "bend", );// 
+set("endwith": "bend", );// 
+set("endtry": "bend", );// 
+set("endfor": "lend", );// 
+set("endwhile": "lend", );// 
+set(} );// 
+set( );// 
+set(path_type = [ );// 
+set("elif", );//  for if
+set("else", );//  for if, try, loops
+set("except", );//  for try
+set("finally", );//  for try
+set(] );// 
+set( );// 
+set(VFCSEPERATOR = ';//' );// 
+set( );// 
+input(def is_path(line: str) -> bool: );// beginfunc #beginfunc
+set(""" );// 
+set(Return True if the first word of the given line is one of the path type. );// 
+set(""" );// 
+set(parts = line.strip().split(None, 1) );// 
+branch(if not parts: );// beginif #beginif
+path();//
+set(return False );// 
+bend( );// endif
+bend( );// endif
+branch(if parts[0].strip(" :") in path_type: );// beginif #beginif
+path();//
+set(return True );// 
+bend( );// endif
+end( );// endfunc
+bend( );// endif
+end( );// endfunc
+set( );// 
+input(def get_VFC_type(line: str) -> Optional[str]: );// beginfunc #beginfunc
+set(""" );// 
+set(If the first word of `line` (without any leading ' );// ') is in Begins or Ends,
+set(returns its mapped type; otherwise returns None. );// 
+set(""" );// 
+set(parts = line.strip().split(None, 1) );// 
+branch(if not parts: );// beginif #beginif
+path();//
+set(return "set" );// 
+bend( );// endif
+bend( );// endif
+set( );// 
+set(marker = parts[0] );// 
+set( );// 
+branch(if marker in Begins: );// beginif #beginif
+path();//
+set(return begin_type[marker] );// 
+bend( );// endif
+bend( );// endif
+branch(if marker in Ends: );// beginif #beginif
+path();//
+set(return end_type[marker] );// 
+bend( );// endif
+bend( );// endif
+set(return "set" );// 
+end( );// endfunc
+end( );// endfunc
+set( );// 
+input(def split_string(input_string): );// beginfunc #beginfunc
+set(parts = input_string.split(" );// ", 1)  # Split at the first occurrence of '#'
+set(s1 = parts[0] );// 
+set(s2 = parts[1] if len(parts) > 1 else "" );//  s2 holds the second part, or remains empty
+set(return (s1, s2) );// 
+end( );// endfunc
+end( );// endfunc
+set( );// 
+input(def generate_VFC(input_string): );// beginfunc #beginfunc
+set(strings = input_string.split("\n") );//  Splits the input at each newline
+set(VFC = '' );// 
+loop(for string in strings: );// beginfor #beginfor
+set(code, comment = split_string( string ) );// 
+set(code = code.strip() );// 
+branch(if( is_path( code ) ): );// beginif #beginif
+path();//
+set(VFC += f'path({ code } ){ VFCSEPERATOR } { comment }\n' );// 
+path(else: );// 
+set(type = get_VFC_type(comment) );// 
+set( );// 
+set(VFC += f'{ type }({ code } ){ VFCSEPERATOR } { comment }\n' );// 
+branch(if type == "branch" : 	VFC += "path()" + VFCSEPERATOR + "\n" );// beginif #beginif
+path();//
+bend( );// endif
+bend( );// endif
+lend( );// endfor
+bend( );// endif
+bend( );// endif
+lend( );// endfor
+set(return VFC );// 
+end( );// endfunc
+end( );// endfunc
+set( );// 
+input(def main(): );// beginfunc #beginfunc
+set( );// 
+set(import argparse );// 
+set( );// 
+set(parser = argparse.ArgumentParser(description='Add structure comments to Python code') );// 
+set(parser.add_argument('input_file', help='Input Python file') );// 
+set(parser.add_argument('-o', '--output', help='Output file (default: stdout)') );// 
+set( );// 
+set(args = parser.parse_args() );// 
+set( );// 
+set(commenter = CompleteStructureCommenter() );// 
+set(modified_code = commenter.add_comments(args.input_file, args.output) );// 
+set( );// 
+set(VFC = generate_VFC(modified_code) );// 
+set( );// 
+branch(with( open( args.input_file+'.vfc' , 'w') as VFC_output ) : );// beginwith #beginwith
+path();//
+set(VFC_output.write( VFC ) );// 
+bend( );// endwith
+bend( );// endwith
+set( );// 
+set(return modified_code );// 
+end( );// endfunc
+end( );// endfunc
+set( );// 
+set( );// 
+branch(if __name__ == '__main__': );// beginif #beginif
+path();//
+set(main() );// 
+bend( );// endif
+bend( );// endif
+set( );// 

@@ -1,0 +1,361 @@
+event(import ast);// 
+event(import os);// 
+event(import sys);// 
+event(import re);// 
+event(from typing import List, Dict, Set, Optional, Tuple, Any);// 
+event(from collections import defaultdict);// 
+input(class CompleteStructureCommenter:);// beginclass
+branch();//
+path();//
+path();//
+input(def __init__(self):);// beginmethod
+set(self.source_lines = []);// 
+set(self.result_lines = []);// 
+set(self.begin_comments = {});// 
+set(self.end_comments = defaultdict(list));// 
+end();// endmethod
+input(def add_comments(self, filename: str, output_filename: Optional[str] = None) -> str:);// beginmethod
+set("""Add structural comments to a Python file.""");// 
+branch(with open(filename, 'r', encoding='utf-8') as f:);// beginwith
+path();//
+set(content = f.read());// 
+bend();// endwith
+set(return self.add_comments_to_string(content, output_filename));// 
+end();// endmethod
+input(def add_comments_to_string(self, content: str, output_filename: Optional[str] = None) -> str:);// beginmethod
+set("""Add structural comments to a Python string.""");// 
+set(self.source_lines = content.splitlines());// 
+branch(try:);// begintry
+path();//
+set(clean_content = re.sub(r'\*([a-zA-Z0-9_]+)\*', r'\1', content));// 
+set(tree = ast.parse(clean_content));// 
+path(except SyntaxError as e:);// 
+set(print(f"Syntax error in input file: {e}"));// 
+set(return content);// 
+bend();// endtry
+set(self._collect_comments(tree));// 
+set(self._apply_comments());// 
+set(modified_content = '\n'.join(self.result_lines));// 
+branch(if output_filename:);// beginif
+path();//
+branch(with open(output_filename, 'w', encoding='utf-8') as f:);// beginwith
+path();//
+set(f.write(modified_content));// 
+bend();// endwith
+bend();// endif
+set(return modified_content);// 
+end();// endmethod
+input(def _get_indent(self, line_idx: int) -> str:);// beginmethod
+set("""Get the indentation of a line.""");// 
+branch(if line_idx < 0 or line_idx >= len(self.source_lines):);// beginif
+path();//
+set(return "");// 
+bend();// endif
+set(line = self.source_lines[line_idx]);// 
+set(return line[:len(line) - len(line.lstrip())]);// 
+end();// endmethod
+input(def _collect_comments_for_node(self, node, node_type, begin_comment, end_comment):);// beginmethod
+set("""Collect begin and end comments for a specific node.""");// 
+branch(if not hasattr(node, 'lineno') or not hasattr(node, 'end_lineno'):);// beginif
+path();//
+set(return);// 
+bend();// endif
+set(start_line = node.lineno - 1);// 
+set(end_line = node.end_lineno - 1);// 
+set(indent = self._get_indent(start_line));// 
+branch(if start_line not in self.begin_comments:);// beginif
+path();//
+set(self.begin_comments[start_line] = []);// 
+bend();// endif
+set(self.begin_comments[start_line].append(begin_comment));// 
+set(self.end_comments[end_line].append((end_comment, indent, start_line)));// 
+end();// endmethod
+input(def _collect_comments(self, tree):);// beginmethod
+set("""First pass: collect all the begin/end comments.""");// 
+set(self.begin_comments = {});// 
+set(self.end_comments = defaultdict(list));// 
+set(parent_map = {});// 
+loop(for parent in ast.walk(tree):);// beginfor
+loop(for child in ast.iter_child_nodes(parent):);// beginfor
+set(parent_map[child] = parent);// 
+lend();// endfor
+lend();// endfor
+loop(for node in ast.walk(tree):);// beginfor
+branch(if isinstance(node, ast.FunctionDef):);// beginif
+path();//
+set(parent = parent_map.get(node));// 
+branch(if parent and isinstance(parent, ast.ClassDef):);// beginif
+path();//
+set(self._collect_comments_for_node(node, "method", "#beginmethod", "#endmethod"));// 
+path(else:);// 
+set(self._collect_comments_for_node(node, "function", "#beginfunc", "#endfunc"));// 
+bend();// endif
+path(elif isinstance(node, ast.ClassDef):);// beginelif
+set(self._collect_comments_for_node(node, "class", "#beginclass", "#endclass"));// 
+path(elif isinstance(node, ast.If):);// beginelif
+set(start_line = node.lineno - 1);// 
+branch(if start_line < len(self.source_lines):);// beginif
+path();//
+set(line = self.source_lines[start_line].strip());// 
+branch(if line.startswith("elif "):);// beginif
+path();//
+set(self._collect_comments_for_node(node, "elif", "#beginelif", "#endlif"));// 
+path(else:);// 
+set(self._collect_comments_for_node(node, "if", "#beginif", "#endif"));// 
+bend();// endif
+path(else:);// 
+set(self._collect_comments_for_node(node, "if", "#beginif", "#endif"));// 
+bend();// endif
+path(elif isinstance(node, ast.For):);// beginelif
+set(self._collect_comments_for_node(node, "for", "#beginfor", "#endfor"));// 
+path(elif isinstance(node, ast.While):);// beginelif
+set(self._collect_comments_for_node(node, "while", "#beginwhile", "#endwhile"));// 
+path(elif isinstance(node, ast.With):);// beginelif
+set(self._collect_comments_for_node(node, "with", "#beginwith", "#endwith"));// 
+path(elif isinstance(node, ast.Try):);// beginelif
+set(self._collect_comments_for_node(node, "try", "#begintry", "#endtry"));// 
+set();// endlif
+set();// endlif
+set();// endlif
+set();// endlif
+set();// endlif
+set();// endlif
+bend();// endif
+lend();// endfor
+end();// endmethod
+input(def _should_skip_comment(self, line, comment_tag):);// beginmethod
+set(""");// 
+set(Check if we should skip adding a comment because it's already in the line,);// 
+set(but make sure we don't skip if it's only inside a string literal.);// 
+set(""");// 
+branch(if comment_tag not in line:);// beginif
+path();//
+set(return False);// 
+bend();// endif
+set(str_positions = []);// 
+loop(for match in re.finditer(r'"[^"\\]*(?:\\.[^"\\]*)*"', line):);// beginfor
+set(str_positions.append((match.start(), match.end())));// 
+lend();// endfor
+loop(for match in re.finditer(r"'[^'\\]*(?:\\.[^'\\]*)*'", line):);// beginfor
+set(str_positions.append((match.start(), match.end())));// 
+lend();// endfor
+loop(for match in re.finditer(re.escape(comment_tag), line):);// beginfor
+set(tag_start = match.start());// 
+set(tag_end = match.end());// 
+set(inside_string = False);// 
+loop(for str_start, str_end in str_positions:);// beginfor
+branch(if str_start <= tag_start and tag_end <= str_end:);// beginif
+path();//
+set(inside_string = True);// 
+set(break);// 
+bend();// endif
+lend();// endfor
+branch(if not inside_string:);// beginif
+path();//
+set(return True);// 
+bend();// endif
+lend();// endfor
+set(return False);// 
+end();// endmethod
+input(def _apply_comments(self):);// beginmethod
+set("""Second pass: apply the comments to the source lines.""");// 
+set(self.result_lines = []);// 
+loop(for i, line in enumerate(self.source_lines):);// beginfor
+branch(if i in self.begin_comments:);// beginif
+path();//
+set(begin_comments = self.begin_comments[i]);// 
+branch(if '#' in line and not line.strip().startswith('#'):);// beginif
+path();//
+set(should_skip = any(self._should_skip_comment(line, comment) for comment in begin_comments));// 
+branch(if should_skip:);// beginif
+path();//
+set(comment_pos = line.find('#'));// 
+set(code_part = line[:comment_pos].rstrip());// 
+set(existing_comment = line[comment_pos:]);// 
+set(begin_comment_str = " ".join(begin_comments));// 
+set(modified = f"{code_part} {begin_comment_str} {existing_comment}");// 
+set(self.result_lines.append(modified));// 
+path(else:);// 
+set(begin_comment_str = " ".join(begin_comments));// 
+set(self.result_lines.append(f"{line} {begin_comment_str}"));// 
+bend();// endif
+path(else:);// 
+set(begin_comment_str = " ".join(begin_comments));// 
+set(self.result_lines.append(f"{line} {begin_comment_str}"));// 
+bend();// endif
+path(else:);// 
+set(self.result_lines.append(line));// 
+bend();// endif
+branch(if i in self.end_comments:);// beginif
+path();//
+set(sorted_end_comments = sorted();// 
+set(self.end_comments[i],);// 
+set(key=lambda x: x[2],);// 
+set(reverse=True);// 
+set());// 
+loop(for end_comment, indent, _ in sorted_end_comments:);// beginfor
+set(self.result_lines.append(f"{indent}{end_comment}"));// 
+lend();// endfor
+bend();// endif
+lend();// endfor
+end();// endmethod
+set(Ends = [);// 
+set("endfunc",);// 
+set("endmethod",);// 
+set("endclass",);// 
+set("endif",);// 
+set(#"endlif",  # Added for elif statements);// 0,  # Added for elif statements
+set("endwith",);// 
+set("endtry",);// 
+set("endfor",);// 
+set("endwhile",);// 
+set(]);// 
+set(Begins = [);// 
+set("beginfunc",);// 
+set("beginmethod",);// 
+set("beginclass",);// 
+set("beginif",);// 
+set("beginelif",);// 
+set("begintry",);// 
+set("beginwith",);// 
+set("beginwhile",);// 
+set("beginfor",);// 
+set(]);// 
+set(begin_type = {);// 
+set("beginfunc": "input",);// 
+set("beginmethod": "input",);// 
+set("beginclass": "input",);// 
+set("beginif": "branch",);// 
+set("beginelif": "branch",);// 
+set("begintry": "branch",);// 
+set("beginwith": "branch",);// 
+set("beginwhile": "loop",);// 
+set("beginfor": "loop",);// 
+set(});// 
+set(end_type = {);// 
+set("endfunc": "end",);// 
+set("endmethod": "end",);// 
+set("endclass": "end",);// 
+set("endif": "bend",);// 
+set(#"endlif": "bend",  # Same type as endif);// 0: 0,  # Same type as endif
+set("endwith": "bend",);// 
+set("endtry": "bend",);// 
+set("endfor": "lend",);// 
+set("endwhile": "lend",);// 
+set(});// 
+set(path_type = [);// 
+set("elif",);// 
+set("else",);// 
+set("except",);// 
+set("finally",);// 
+set(]);// 
+set(VFCSEPERATOR = ';//');// 
+bend();//
+end();// endclass
+input(def is_path(line: str) -> bool:);// beginfunc
+set(""");// 
+set(Return True if the first word of the given line is one of the path type.);// 
+set(""");// 
+set(parts = line.strip().split(None, 1));// 
+branch(if not parts:);// beginif
+path();//
+set(return False);// 
+bend();// endif
+branch(if parts[0].strip(" :") in path_type:);// beginif
+path();//
+set(return True);// 
+bend();// endif
+end();// endfunc
+input(def get_VFC_type(line: str) -> Optional[str]:);// beginfunc
+set(""");// 
+set(If the first word of `line` (without any leading '#') is in Begins or Ends,);// 
+set(returns its mapped type; otherwise returns None.);// 
+set(""");// 
+set(parts = line.strip().split(None, 1));// 
+branch(if not parts:);// beginif
+path();//
+set(return "set");// 
+bend();// endif
+set(marker = parts[0]);// 
+branch(if marker in Begins:);// beginif
+path();//
+set(return begin_type[marker]);// 
+bend();// endif
+branch(if marker in Ends:);// beginif
+path();//
+set(return end_type[marker]);// 
+bend();// endif
+set(return "set");// 
+end();// endfunc
+input(def replace_string_literals(input_string):);// beginfunc
+set(result = re.sub(r'(["\'])(.*?)(\1)', '0', input_string));// 
+set(return result);// 
+end();// endfunc
+input(def split_on_comment(input_string):);// beginfunc
+set(match = re.search(r'(?<!")#.*$', temp_str));// 
+branch(if match:);// beginif
+path();//
+set(s1 = input_string.strip());// 
+set(s2 = match.strip());// 
+path(else:);// 
+set(s1, s2 = input_string.strip(), "");// 
+bend();// endif
+set(return (s1, s2));// 
+end();// endfunc
+input(def split_string(input_string):);// beginfunc
+set(temp_str = replace_string_literals(input_string));// 
+set(parts = temp_str.split("#", 1)  # Split at the first occurrence of '#');//  Split at the first occurrence of 0
+set(s1 = input_string.strip());// 
+branch(if len(parts) > 1 :);// beginif
+path();//
+set(s2 = parts[1]);// 
+set(s1 = s1.replace('#'+s2, ""));// 
+path(else:);// 
+set(s2 = "");// 
+bend();// endif
+set(return (s1, s2));// 
+end();// endfunc
+input(def generate_VFC(input_string):);// beginfunc
+set(strings = input_string.split("\n"));// 
+set(VFC = '');// 
+loop(for string in strings:);// beginfor
+branch(if not string.strip():);// beginif
+path();//
+set(continue);// 
+bend();// endif
+set(code, comment = split_string(string));// 
+set(code = code.strip());// 
+branch(if is_path(code):);// beginif
+path();//
+set(VFC += f'path({code}){VFCSEPERATOR} {comment}\n');// 
+path(else:);// 
+set(type = get_VFC_type(comment));// 
+set(VFC += f'{type}({code}){VFCSEPERATOR} {comment}\n');// 
+branch(if type == "branch":);// beginif
+path();//
+set(VFC += f"path(){VFCSEPERATOR}\n");// 
+bend();// endif
+bend();// endif
+lend();// endfor
+set(return VFC);// 
+end();// endfunc
+input(def main():);// beginfunc
+event(import argparse);// 
+set(parser = argparse.ArgumentParser(description='Add structure comments to Python code'));// 
+set(parser.add_argument('input_file', help='Input Python file'));// 
+set(parser.add_argument('-o', '--output', help='Output file (default: stdout)'));// 
+set(args = parser.parse_args());// 
+set(commenter = CompleteStructureCommenter());// 
+set(modified_code = commenter.add_comments(args.input_file, args.output));// 
+set(VFC = generate_VFC(modified_code));// 
+branch(with open(args.input_file+'.vfc', 'w') as VFC_output:);// beginwith
+path();//
+set(VFC_output.write(VFC));// 
+bend();// endwith
+set(return modified_code);// 
+end();// endfunc
+branch(if __name__ == '__main__':);// beginif
+path();//
+set(t = main());// 
+bend();// endif
+set();//   Export  Date: 03:13:09 AM - 21:Apr:2025...
