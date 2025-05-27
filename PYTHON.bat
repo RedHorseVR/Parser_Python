@@ -8,7 +8,6 @@ echo The absolute path of this batch file is: %BAT_FILE_PATH%
 echo off
 echo Processing files...
 
-@echo off
 setlocal enabledelayedexpansion
 
 for %%F in (%*) do (
@@ -21,9 +20,9 @@ for %%F in (%*) do (
     
     copy %%F %%~dpF\_!filename!
     
-    python %BAT_FILE_PATH%\parse_Python.py %%F
+    python.exe %CD%\parse_Python.py %%F
 
-    start VFC2000 %%F.vfc
+    start VFC2000 %%F.vfc -Reload
 )
 
 
