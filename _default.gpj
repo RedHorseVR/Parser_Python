@@ -1,0 +1,97 @@
+#!gbuild
+#macro CONFIG_RELEASE_BUILD=1
+macro __ARM_DIR=$(__BUILD_DIR)\..\..\Libraries\armadillo
+macro __BSP_DIR=$__OS_DIR\$__BSP_NAME
+macro __BSP_NAME=edu-RC
+# Note: Will default build first config, order matters
+defineConfig ("EDU Master" edu_master EDU-Master.gpc)
+defineConfig ("EDU Master GTEST" edu_master_gtest EDU-Master-Gtest.gpc)
+
+macro __BUILD_DIR=%expand_path(.)
+macro __COM_DIR=$(__BUILD_DIR)\..\..\Source\Common
+macro __EIG_DIR=$(__BUILD_DIR)\..\..\Libraries\Eigen
+macro __LIBS_DIR_BASE=${__OS_DIR}\libs
+macro __MASTER_DIR=$(__BUILD_DIR)\..\..\Source\MasterCPU
+macro __OS_DIR=C:\ghs\int1144
+macro __TRANCHE_ONE=1
+##################################################################################
+# Compiler Optimizations - comment out for debug   
+#macro OPTIMIZE_MODULE=1
+##################################################################################
+externalDepends=$__BSP_DIR/default.gpj
+primaryTarget=ppc_integrity.tgt
+customization=$__OS_DIR\target\integrity.bod
+#component top_level_project
+[Project]
+   #-double_check.level=high
+	-bsp edu-RC
+	-G
+	-object_dir=objs
+	:sourceDir=.
+	:optionsFile=${__OS_DIR}\target\${__BSP_NAME}.opt
+	-os_dir $__OS_DIR
+   #Ignore nuisance eigen library warnings
+   #storage class is not first
+   --diag_suppress=82
+   #overloading the &&, ||, or comma operators is dangerous
+   --diag_suppress=1974
+   #support for exception handling is disabled
+   --diag_suppress=540
+   #overloaded virtual function is only partially implemented
+   --diag_suppress=611
+	-Itgt
+	-I$(__BUILD_DIR)\..\..\Source\Common\Main
+	-I$(__BUILD_DIR)\..\..\Source\MasterCPU\MainVAS
+	-I$(__BUILD_DIR)\..\..\Source\MasterCPU\MainVAS\StarCal
+	-I$(__BUILD_DIR)\..\..\Source\MasterCPU\MainVAS\KSS
+	-I$(__BUILD_DIR)\..\..\Source\MasterCPU\MainVAS\RevRemap
+	-I$(__BUILD_DIR)\..\..\Source\Common\Serial
+	-I$(__BUILD_DIR)\..\..\Source\Common\Ethernet
+	-I$(__BUILD_DIR)\..\..\Source\Common\Ethernet\GseCommands
+	-I$(__BUILD_DIR)\..\..\Source\Common\Ethernet\Tlm
+	-I$(__BUILD_DIR)\..\..\Source\Common
+	-I$(__BUILD_DIR)\..\..\Source\AlgCPU\MainVAS\Remap\SupportingFunctions
+	-I$(__BUILD_DIR)\..\..\Source\AlgCPU\MainVAS
+	-I$(__BUILD_DIR)\..\..\Source\Common\Pcie
+	-I$(__BUILD_DIR)\..\..\Source\Common\Utilities
+	#Conditional gtest includes
+	{isdefined(__FSW_GTEST_GHS_BUILD)} -I$(__BUILD_DIR)\$(__GTEST_DIR)\include
+	{isdefined(__FSW_GTEST_GHS_BUILD)} -I$(__BUILD_DIR)\$(__GTEST_DIR)\src
+	{isdefined(__FSW_GTEST_GHS_BUILD)} -I$(__BUILD_DIR)\..\..\UnitTesting
+	{isdefined(__FSW_GTEST_GHS_BUILD)} -I$(__BUILD_DIR)\..\..\UnitTesting\Source
+	{isdefined(__FSW_GTEST_GHS_BUILD)} -I$(__BUILD_DIR)\..\..\UnitTesting\Stubs
+	#end gtest includes
+	-DSPI_FLASH_3DPLUS_256=1
+	-DTRANCHE_ONE=1
+	-DEDU
+	-DMASTER_CPU
+   ##################################################################################
+   #COMMENT OUT for full ECM - these define flags allow testing with less than full ECM
+   #Current defined flags allow for testing just the EDU
+   #-DNO_SCB
+   #-DNO_TLM
+   #-DNO_CRYO
+   #-DNO_LVDS
+   #-DNO_PCIE
+   #-DNO_SCIO
+   #-DNO_PCIO
+   #-DNO_SCIO_LVDS
+   #-DNO_IRSTAP_COMMS
+   #if GPU is not available for EDU builds use NO_GPU to comment it out
+   #-DNO_GPU
+   #if using DSS, define NO_PROXE
+   #-DNO_PROXE
+   #-DNO_SCRUBBER
+   ##################################################################################
+   # Test Only Features - these are typically for very narrow usage, may not handle all cases well
+   #-DIRSTAP_FORWARD # receive IRSTAP messages over UDP, forward to TaskIrstapMaster
+   #-DTRACKER_STANDALONE # make testing the tracker easier (e.g., skip checks on OPS mode)
+   #-DTRACKER_DEBUG # additional features to debug the tracker
+   #-DCALIBRATION_NOCOLLECT #Run Calibration Processes without requiring IRSTAP img collection
+	--c++14
+	{!isdefined(CONFIG_RELEASE_BUILD)} -lmulti
+..\..\Libraries\project_libs.gpj		[Project]
+$(__MASTER_DIR)\EDUMaster.gpj		[INTEGRITY Application]
+tgt\resources.gpj		[Project]
+{isdefined(__FSW_GTEST_GHS_BUILD)} ..\..\UnitTesting\Libraries\project_utest_libs.gpj		[Project]
+

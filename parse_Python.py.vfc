@@ -1,8 +1,8 @@
 ;  IRL FlowCode Version: Version 10.0
 ;  c1995-2015: Visual Flow Coder by 2LResearch
 ;
-;  File Name : pyCommentParser.py.vfc
-;  File Date : 11:13:19 AM - 22:Apr:2025
+;  File Name : parse_Python.py.vfc
+;  File Date : 11:39:13 AM - 25:May:2025
 
 event(import ast);// 
 event(import os);// 
@@ -45,7 +45,8 @@ set();//  Replace asterisks in identifiers for AST parsing only
 set(clean_content = re.sub(r'\*([a-zA-Z0-9_]+)\*', r'\1', content));// 
 set(tree = ast.parse(clean_content));// 
 path(except SyntaxError as e:);// 
-set(print(f"Syntax error in input file: {e}"));// 
+output(print(f"Syntax error in input file: {e}"));//// //
+event(input("enter to continue") ;);//
 set(return content);// 
 bend();// endtry
 set();//  First pass: collect all the begin/end comments
@@ -471,7 +472,7 @@ bend();// endif
 
 ;INSECTA EMBEDDED SESSION INFORMATION
 ; 255 16777215 65280 16777088 16711680 13158600 13158600 0 255 255 9895835 6946660 3289650
-;    pyCommentParser.py   #   .
+;    parse_Python.py   #   .
 ; notepad.exe
 ;INSECTA EMBEDDED ALTSESSION INFORMATION
-; 1458 213 1911 1814 7 30   375   87    python.key  0
+; 1458 213 1911 1814 39 190   4294966724   4294965485    python.key  0
