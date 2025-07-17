@@ -25,5 +25,5 @@ for %%F in (%*) do (
     start VFC2000 %%F.vfc -Reload
 )
 
-
+PAUSE
 
