@@ -177,7 +177,7 @@ class CompleteStructureCommenter:
             if i in self.begin_comments:
 
                 begin_comments = self.begin_comments[i]
-                begin_comment_str = " &&&".join(begin_comments)
+                begin_comment_str = " ".join(begin_comments)
 
                 if "#" in line and not line.strip().startswith("#"):
 
@@ -373,7 +373,7 @@ def generate_VFC(input_string):
         if marker == "endclass":
             VFC += f"bend(){VFCSEPERATOR}\n"
 
-        VFC += f"{type}({code}){VFCSEPERATOR} {comment}\n"
+        VFC += f'{type}({code}){VFCSEPERATOR} { comment.replace( marker, "" , 1 ) }\n'
         ## POST FIX TOKENS
         if type == "branch":
             VFC += f"path(){VFCSEPERATOR}\n"
