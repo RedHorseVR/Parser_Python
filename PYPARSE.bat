@@ -27,3 +27,4 @@ for %%F in (%*) do (
 
 
 
+pause

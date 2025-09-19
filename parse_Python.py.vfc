@@ -2,7 +2,7 @@
 ;  c1995-2015: Visual Flow Coder by 2LResearch
 ;
 ;  File Name : parse_Python.py.vfc
-;  File Date : 11:39:13 AM - 25:May:2025
+;  File Date : 11:01:12 AM - 19:Sep:2025
 
 event(import ast);// 
 event(import os);// 
@@ -16,6 +16,7 @@ set("""A more robust Python structure commenter that handles multi-block endings
 branch();//
 path();//
 path();//
+event();//
 
 input(def __init__(self):);// beginmethod
 set(self.source_lines = []);// 
@@ -213,6 +214,7 @@ branch(if i in self.begin_comments:);// beginif
 path();//
 set();//  Need to add begin comments
 set(begin_comments = self.begin_comments[i]);// 
+set(begin_comment_str = " &&&".join(begin_comments));// 
 set();//  Check if line already has a comment
 branch(if '#' in line and not line.strip().startswith('#'):);// beginif
 path();//
@@ -225,17 +227,16 @@ set(comment_pos = line.find('#'));//
 set(code_part = line[:comment_pos].rstrip());// 
 set(existing_comment = line[comment_pos:]);// 
 set();//  Add our begin comments before the existing comment
-set(begin_comment_str = " ".join(begin_comments));// 
+set( );//begin_comment_str = " ".join(begin_comments)
 set(modified = f"{code_part} {begin_comment_str} {existing_comment}");// 
 set(self.result_lines.append(modified));// 
 path(else:);// 
 set();//  No existing structure comments (or only in string literals)
-set(begin_comment_str = " ".join(begin_comments));// 
 set(self.result_lines.append(f"{line} {begin_comment_str}"));// 
 bend();// endif
 path(else:);// 
 set();//  No existing comment, add to end
-set(begin_comment_str = " ".join(begin_comments));// 
+set( );//begin_comment_str = " ".join(begin_comments)
 set(self.result_lines.append(f"{line} {begin_comment_str}"));// 
 bend();// endif
 path(else:);// 
@@ -262,7 +263,8 @@ end();// endmethod
 bend();//
 end();// endclass
 set();//  Extended lists to include the new endif/endlif distinction
-set(Ends = [);// 
+branch(Ends = [);// 
+path();//
 set("endfunc",);// 
 set("endmethod",);// 
 set("endclass",);// 
@@ -272,8 +274,9 @@ set("endwith",);//
 set("endtry",);// 
 set("endfor",);// 
 set("endwhile",);// 
-set(]);// 
-set(Begins = [);// 
+bend(]);//// //
+branch(Begins = [);//// //
+path();//
 set("beginfunc",);// 
 set("beginmethod",);// 
 set("beginclass",);// 
@@ -283,9 +286,10 @@ set("begintry",);//
 set("beginwith",);// 
 set("beginwhile",);// 
 set("beginfor",);// 
-set(]);// 
+bend(]);//// //
 set();//  Update the begin_type mapping to include beginelif
-set(begin_type = {);// 
+branch(begin_type = {);////// ////
+path();//
 set("beginfunc": "input",);// 
 set("beginmethod": "input",);// 
 set("beginclass": "input",);// 
@@ -295,9 +299,10 @@ set("begintry": "branch",);//
 set("beginwith": "branch",);// 
 set("beginwhile": "loop",);// 
 set("beginfor": "loop",);// 
-set(});// 
+bend(});//// //
 set();//  Update the end_type mapping to include endlif
-set(end_type = {);// 
+branch(end_type = {);//// //
+path();//
 set("endfunc": "end",);// 
 set("endmethod": "end",);// 
 set("endclass": "end",);// 
@@ -307,21 +312,24 @@ set("endwith": "bend",);//
 set("endtry": "bend",);// 
 set("endfor": "lend",);// 
 set("endwhile": "lend",);// 
-set(});// 
-set(path_type = [);// 
+bend(});//// //
+branch(path_type = [);//// //
+path();//
 set("elif",);//  for if
 set("else",);//  for if, try, loops
 set("except",);//  for try
 set("finally",);//  for try
-set(]);// 
-set(event_type = [);// 
+bend(]);//// //
+branch(event_type = [);//// //
+path();//
 set("import",);// 
 set("from",);// 
-set(]);// 
-set(output_type = [);// 
+bend(]);//// //
+branch(output_type = [);//// //
+path();//
 set("print",);// 
 set(".write",);// 
-set(]);// 
+bend(]);//// //
 set(VFCSEPERATOR = ';//');// 
 
 input(def is_path(line: str) -> bool:);// beginfunc
@@ -475,4 +483,4 @@ bend();// endif
 ;    parse_Python.py   #   .
 ; notepad.exe
 ;INSECTA EMBEDDED ALTSESSION INFORMATION
-; 1458 213 1911 1814 39 190   4294966724   4294965485    python.key  0
+; 396 142 1464 1772 202 129   4294967194   4294960927    python.key  0
