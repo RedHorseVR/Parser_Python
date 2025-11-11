@@ -4,170 +4,170 @@ event(import sys);//
 event(import re);// 
 event(from typing import List, Dict, Set, Optional, Tuple, Any);// 
 event(from collections import defaultdict);// 
-input(class CompleteStructureCommenter:);// beginclass
+input(class CompleteStructureCommenter:);// 
 branch();//
 path();//
 path();//
-input(def __init__(self):);// beginmethod
+input(def __init__(self):);// 
 set(self.source_lines = []);// 
 set(self.result_lines = []);// 
 set(self.begin_comments = {});// 
 set(self.end_comments = defaultdict(list));// 
-end();// endmethod
-input(def add_comments(self, filename: str, output_filename: Optional[str] = None) -> str:);// beginmethod
+end();// 
+input(def add_comments(self, filename: str, output_filename: Optional[str] = None) -> str:);// 
 set("""Add structural comments to a Python file.""");// 
-branch(with open(filename, 'r', encoding='utf-8') as f:);// beginwith
+branch(with open(filename, 'r', encoding='utf-8') as f:);// 
 path();//
 set(content = f.read());// 
-bend();// endwith
+bend();// 
 set(return self.add_comments_to_string(content, output_filename));// 
-end();// endmethod
-input(def add_comments_to_string(self, content: str, output_filename: Optional[str] = None) -> str:);// beginmethod
+end();// 
+input(def add_comments_to_string(self, content: str, output_filename: Optional[str] = None) -> str:);// 
 set("""Add structural comments to a Python string.""");// 
 set(self.source_lines = content.splitlines());// 
-branch(try:);// begintry
+branch(try:);// 
 path();//
 set(clean_content = re.sub(r'\*([a-zA-Z0-9_]+)\*', r'\1', content));// 
 set(tree = ast.parse(clean_content));// 
 path(except SyntaxError as e:);// 
 set(print(f"Syntax error in input file: {e}"));// 
 set(return content);// 
-bend();// endtry
+bend();// 
 set(self._collect_comments(tree));// 
 set(self._apply_comments());// 
 set(modified_content = '\n'.join(self.result_lines));// 
-branch(if output_filename:);// beginif
+branch(if output_filename:);// 
 path();//
-branch(with open(output_filename, 'w', encoding='utf-8') as f:);// beginwith
+branch(with open(output_filename, 'w', encoding='utf-8') as f:);// 
 path();//
 set(f.write(modified_content));// 
-bend();// endwith
-bend();// endif
+bend();// 
+bend();// 
 set(return modified_content);// 
-end();// endmethod
-input(def _get_indent(self, line_idx: int) -> str:);// beginmethod
+end();// 
+input(def _get_indent(self, line_idx: int) -> str:);// 
 set("""Get the indentation of a line.""");// 
-branch(if line_idx < 0 or line_idx >= len(self.source_lines):);// beginif
+branch(if line_idx < 0 or line_idx >= len(self.source_lines):);// 
 path();//
 set(return "");// 
-bend();// endif
+bend();// 
 set(line = self.source_lines[line_idx]);// 
 set(return line[:len(line) - len(line.lstrip())]);// 
-end();// endmethod
-input(def _collect_comments_for_node(self, node, node_type, begin_comment, end_comment):);// beginmethod
+end();// 
+input(def _collect_comments_for_node(self, node, node_type, begin_comment, end_comment):);// 
 set("""Collect begin and end comments for a specific node.""");// 
-branch(if not hasattr(node, 'lineno') or not hasattr(node, 'end_lineno'):);// beginif
+branch(if not hasattr(node, 'lineno') or not hasattr(node, 'end_lineno'):);// 
 path();//
 set(return);// 
-bend();// endif
+bend();// 
 set(start_line = node.lineno - 1);// 
 set(end_line = node.end_lineno - 1);// 
 set(indent = self._get_indent(start_line));// 
-branch(if start_line not in self.begin_comments:);// beginif
+branch(if start_line not in self.begin_comments:);// 
 path();//
 set(self.begin_comments[start_line] = []);// 
-bend();// endif
+bend();// 
 set(self.begin_comments[start_line].append(begin_comment));// 
 set(self.end_comments[end_line].append((end_comment, indent, start_line)));// 
-end();// endmethod
-input(def _collect_comments(self, tree):);// beginmethod
+end();// 
+input(def _collect_comments(self, tree):);// 
 set("""First pass: collect all the begin/end comments.""");// 
 set(self.begin_comments = {});// 
 set(self.end_comments = defaultdict(list));// 
 set(parent_map = {});// 
-loop(for parent in ast.walk(tree):);// beginfor
-loop(for child in ast.iter_child_nodes(parent):);// beginfor
+loop(for parent in ast.walk(tree):);// 
+loop(for child in ast.iter_child_nodes(parent):);// 
 set(parent_map[child] = parent);// 
-lend();// endfor
-lend();// endfor
-loop(for node in ast.walk(tree):);// beginfor
-branch(if isinstance(node, ast.FunctionDef):);// beginif
+lend();// 
+lend();// 
+loop(for node in ast.walk(tree):);// 
+branch(if isinstance(node, ast.FunctionDef):);// 
 path();//
 set(parent = parent_map.get(node));// 
-branch(if parent and isinstance(parent, ast.ClassDef):);// beginif
+branch(if parent and isinstance(parent, ast.ClassDef):);// 
 path();//
 set(self._collect_comments_for_node(node, "method", "#beginmethod", "#endmethod"));// 
 path(else:);// 
 set(self._collect_comments_for_node(node, "function", "#beginfunc", "#endfunc"));// 
-bend();// endif
-path(elif isinstance(node, ast.ClassDef):);// beginelif
+bend();// 
+path(elif isinstance(node, ast.ClassDef):);// 
 set(self._collect_comments_for_node(node, "class", "#beginclass", "#endclass"));// 
-path(elif isinstance(node, ast.If):);// beginelif
+path(elif isinstance(node, ast.If):);// 
 set(start_line = node.lineno - 1);// 
-branch(if start_line < len(self.source_lines):);// beginif
+branch(if start_line < len(self.source_lines):);// 
 path();//
 set(line = self.source_lines[start_line].strip());// 
-branch(if line.startswith("elif "):);// beginif
+branch(if line.startswith("elif "):);// 
 path();//
 set(self._collect_comments_for_node(node, "elif", "#beginelif", "#endlif"));// 
 path(else:);// 
 set(self._collect_comments_for_node(node, "if", "#beginif", "#endif"));// 
-bend();// endif
+bend();// 
 path(else:);// 
 set(self._collect_comments_for_node(node, "if", "#beginif", "#endif"));// 
-bend();// endif
-path(elif isinstance(node, ast.For):);// beginelif
+bend();// 
+path(elif isinstance(node, ast.For):);// 
 set(self._collect_comments_for_node(node, "for", "#beginfor", "#endfor"));// 
-path(elif isinstance(node, ast.While):);// beginelif
+path(elif isinstance(node, ast.While):);// 
 set(self._collect_comments_for_node(node, "while", "#beginwhile", "#endwhile"));// 
-path(elif isinstance(node, ast.With):);// beginelif
+path(elif isinstance(node, ast.With):);// 
 set(self._collect_comments_for_node(node, "with", "#beginwith", "#endwith"));// 
-path(elif isinstance(node, ast.Try):);// beginelif
+path(elif isinstance(node, ast.Try):);// 
 set(self._collect_comments_for_node(node, "try", "#begintry", "#endtry"));// 
-set();// endlif
-set();// endlif
-set();// endlif
-set();// endlif
-set();// endlif
-set();// endlif
-bend();// endif
-lend();// endfor
-end();// endmethod
-input(def _should_skip_comment(self, line, comment_tag):);// beginmethod
+set();// 
+set();// 
+set();// 
+set();// 
+set();// 
+set();// 
+bend();// 
+lend();// 
+end();// 
+input(def _should_skip_comment(self, line, comment_tag):);// 
 set(""");// 
 set(Check if we should skip adding a comment because it's already in the line,);// 
 set(but make sure we don't skip if it's only inside a string literal.);// 
 set(""");// 
-branch(if comment_tag not in line:);// beginif
+branch(if comment_tag not in line:);// 
 path();//
 set(return False);// 
-bend();// endif
+bend();// 
 set(str_positions = []);// 
-loop(for match in re.finditer(r'"[^"\\]*(?:\\.[^"\\]*)*"', line):);// beginfor
+loop(for match in re.finditer(r'"[^"\\]*(?:\\.[^"\\]*)*"', line):);// 
 set(str_positions.append((match.start(), match.end())));// 
-lend();// endfor
-loop(for match in re.finditer(r"'[^'\\]*(?:\\.[^'\\]*)*'", line):);// beginfor
+lend();// 
+loop(for match in re.finditer(r"'[^'\\]*(?:\\.[^'\\]*)*'", line):);// 
 set(str_positions.append((match.start(), match.end())));// 
-lend();// endfor
-loop(for match in re.finditer(re.escape(comment_tag), line):);// beginfor
+lend();// 
+loop(for match in re.finditer(re.escape(comment_tag), line):);// 
 set(tag_start = match.start());// 
 set(tag_end = match.end());// 
 set(inside_string = False);// 
-loop(for str_start, str_end in str_positions:);// beginfor
-branch(if str_start <= tag_start and tag_end <= str_end:);// beginif
+loop(for str_start, str_end in str_positions:);// 
+branch(if str_start <= tag_start and tag_end <= str_end:);// 
 path();//
 set(inside_string = True);// 
 set(break);// 
-bend();// endif
-lend();// endfor
-branch(if not inside_string:);// beginif
+bend();// 
+lend();// 
+branch(if not inside_string:);// 
 path();//
 set(return True);// 
-bend();// endif
-lend();// endfor
+bend();// 
+lend();// 
 set(return False);// 
-end();// endmethod
-input(def _apply_comments(self):);// beginmethod
+end();// 
+input(def _apply_comments(self):);// 
 set("""Second pass: apply the comments to the source lines.""");// 
 set(self.result_lines = []);// 
-loop(for i, line in enumerate(self.source_lines):);// beginfor
-branch(if i in self.begin_comments:);// beginif
+loop(for i, line in enumerate(self.source_lines):);// 
+branch(if i in self.begin_comments:);// 
 path();//
 set(begin_comments = self.begin_comments[i]);// 
-branch(if '#' in line and not line.strip().startswith('#'):);// beginif
+branch(if '#' in line and not line.strip().startswith('#'):);// 
 path();//
 set(should_skip = any(self._should_skip_comment(line, comment) for comment in begin_comments));// 
-branch(if should_skip:);// beginif
+branch(if should_skip:);// 
 path();//
 set(comment_pos = line.find('#'));// 
 set(code_part = line[:comment_pos].rstrip());// 
@@ -178,33 +178,33 @@ set(self.result_lines.append(modified));//
 path(else:);// 
 set(begin_comment_str = " ".join(begin_comments));// 
 set(self.result_lines.append(f"{line} {begin_comment_str}"));// 
-bend();// endif
+bend();// 
 path(else:);// 
 set(begin_comment_str = " ".join(begin_comments));// 
 set(self.result_lines.append(f"{line} {begin_comment_str}"));// 
-bend();// endif
+bend();// 
 path(else:);// 
 set(self.result_lines.append(line));// 
-bend();// endif
-branch(if i in self.end_comments:);// beginif
+bend();// 
+branch(if i in self.end_comments:);// 
 path();//
 set(sorted_end_comments = sorted();// 
 set(self.end_comments[i],);// 
 set(key=lambda x: x[2],);// 
 set(reverse=True);// 
 set());// 
-loop(for end_comment, indent, _ in sorted_end_comments:);// beginfor
+loop(for end_comment, indent, _ in sorted_end_comments:);// 
 set(self.result_lines.append(f"{indent}{end_comment}"));// 
-lend();// endfor
-bend();// endif
-lend();// endfor
-end();// endmethod
+lend();// 
+bend();// 
+lend();// 
+end();// 
 set(Ends = [);// 
 set("endfunc",);// 
 set("endmethod",);// 
 set("endclass",);// 
 set("endif",);// 
-set(#"endlif",  # Added for elif statements);// 0,  # Added for elif statements
+set(#"endlif",  # Added for elif statements);//   # Added for elif statements
 set("endwith",);// 
 set("endtry",);// 
 set("endfor",);// 
@@ -237,7 +237,7 @@ set("endfunc": "end",);//
 set("endmethod": "end",);// 
 set("endclass": "end",);// 
 set("endif": "bend",);// 
-set(#"endlif": "bend",  # Same type as endif);// 0: 0,  # Same type as endif
+set(#"endlif": "bend",  # Same type as endif);//  0,  # Same type as endif
 set("endwith": "bend",);// 
 set("endtry": "bend",);// 
 set("endfor": "lend",);// 
@@ -251,95 +251,95 @@ set("finally",);//
 set(]);// 
 set(VFCSEPERATOR = ';//');// 
 bend();//
-end();// endclass
-input(def is_path(line: str) -> bool:);// beginfunc
+end();// 
+input(def is_path(line: str) -> bool:);// 
 set(""");// 
 set(Return True if the first word of the given line is one of the path type.);// 
 set(""");// 
 set(parts = line.strip().split(None, 1));// 
-branch(if not parts:);// beginif
+branch(if not parts:);// 
 path();//
 set(return False);// 
-bend();// endif
-branch(if parts[0].strip(" :") in path_type:);// beginif
+bend();// 
+branch(if parts[0].strip(" :") in path_type:);// 
 path();//
 set(return True);// 
-bend();// endif
-end();// endfunc
-input(def get_VFC_type(line: str) -> Optional[str]:);// beginfunc
+bend();// 
+end();// 
+input(def get_VFC_type(line: str) -> Optional[str]:);// 
 set(""");// 
 set(If the first word of `line` (without any leading '#') is in Begins or Ends,);// 
 set(returns its mapped type; otherwise returns None.);// 
 set(""");// 
 set(parts = line.strip().split(None, 1));// 
-branch(if not parts:);// beginif
+branch(if not parts:);// 
 path();//
 set(return "set");// 
-bend();// endif
+bend();// 
 set(marker = parts[0]);// 
-branch(if marker in Begins:);// beginif
+branch(if marker in Begins:);// 
 path();//
 set(return begin_type[marker]);// 
-bend();// endif
-branch(if marker in Ends:);// beginif
+bend();// 
+branch(if marker in Ends:);// 
 path();//
 set(return end_type[marker]);// 
-bend();// endif
+bend();// 
 set(return "set");// 
-end();// endfunc
-input(def replace_string_literals(input_string):);// beginfunc
+end();// 
+input(def replace_string_literals(input_string):);// 
 set(result = re.sub(r'(["\'])(.*?)(\1)', '0', input_string));// 
 set(return result);// 
-end();// endfunc
-input(def split_on_comment(input_string):);// beginfunc
+end();// 
+input(def split_on_comment(input_string):);// 
 set(match = re.search(r'(?<!")#.*$', temp_str));// 
-branch(if match:);// beginif
+branch(if match:);// 
 path();//
 set(s1 = input_string.strip());// 
 set(s2 = match.strip());// 
 path(else:);// 
 set(s1, s2 = input_string.strip(), "");// 
-bend();// endif
+bend();// 
 set(return (s1, s2));// 
-end();// endfunc
-input(def split_string(input_string):);// beginfunc
+end();// 
+input(def split_string(input_string):);// 
 set(temp_str = replace_string_literals(input_string));// 
-set(parts = temp_str.split("#", 1)  # Split at the first occurrence of '#');//  Split at the first occurrence of 0
+set(parts = temp_str.split("#", 1)  # Split at the first occurrence of '#');//   at the first occurrence of 0
 set(s1 = input_string.strip());// 
-branch(if len(parts) > 1 :);// beginif
+branch(if len(parts) > 1 :);// 
 path();//
 set(s2 = parts[1]);// 
 set(s1 = s1.replace('#'+s2, ""));// 
 path(else:);// 
 set(s2 = "");// 
-bend();// endif
+bend();// 
 set(return (s1, s2));// 
-end();// endfunc
-input(def generate_VFC(input_string):);// beginfunc
+end();// 
+input(def generate_VFC(input_string):);// 
 set(strings = input_string.split("\n"));// 
 set(VFC = '');// 
-loop(for string in strings:);// beginfor
-branch(if not string.strip():);// beginif
+loop(for string in strings:);// 
+branch(if not string.strip():);// 
 path();//
 set(continue);// 
-bend();// endif
+bend();// 
 set(code, comment = split_string(string));// 
 set(code = code.strip());// 
-branch(if is_path(code):);// beginif
+branch(if is_path(code):);// 
 path();//
 set(VFC += f'path({code}){VFCSEPERATOR} {comment}\n');// 
 path(else:);// 
 set(type = get_VFC_type(comment));// 
 set(VFC += f'{type}({code}){VFCSEPERATOR} {comment}\n');// 
-branch(if type == "branch":);// beginif
+branch(if type == "branch":);// 
 path();//
 set(VFC += f"path(){VFCSEPERATOR}\n");// 
-bend();// endif
-bend();// endif
-lend();// endfor
+bend();// 
+bend();// 
+lend();// 
 set(return VFC);// 
-end();// endfunc
-input(def main():);// beginfunc
+end();// 
+input(def main():);// 
 event(import argparse);// 
 set(parser = argparse.ArgumentParser(description='Add structure comments to Python code'));// 
 set(parser.add_argument('input_file', help='Input Python file'));// 
@@ -348,14 +348,14 @@ set(args = parser.parse_args());//
 set(commenter = CompleteStructureCommenter());// 
 set(modified_code = commenter.add_comments(args.input_file, args.output));// 
 set(VFC = generate_VFC(modified_code));// 
-branch(with open(args.input_file+'.vfc', 'w') as VFC_output:);// beginwith
+branch(with open(args.input_file+'.vfc', 'w') as VFC_output:);// 
 path();//
 set(VFC_output.write(VFC));// 
-bend();// endwith
+bend();// 
 set(return modified_code);// 
-end();// endfunc
-branch(if __name__ == '__main__':);// beginif
+end();// 
+branch(if __name__ == '__main__':);// 
 path();//
 set(t = main());// 
-bend();// endif
-set();//   Export  Date: 03:13:09 AM - 21:Apr:2025...
+bend();// 
+set();//     Date: 03:13:09 AM - 21:Apr:2025...
