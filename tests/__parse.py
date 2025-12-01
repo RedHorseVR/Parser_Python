@@ -8,7 +8,6 @@ class CompleteStructureCommenter:# beginclass
 	"""A more robust Python structure commenter that handles multi-block endings."""
 		
 	
-		
 	def __init__(self):# beginmethod
 		self.source_lines = [] 
 		self.result_lines = [] 
@@ -205,7 +204,6 @@ class CompleteStructureCommenter:# beginclass
 			
 				#  Need to add begin comments
 				begin_comments = self.begin_comments[i] 
-				begin_comment_str = " ".join(begin_comments)
 				#  Check if line already has a comment
 				if '#' in line and not line.strip().startswith('#'):# beginif
 				
@@ -218,16 +216,17 @@ class CompleteStructureCommenter:# beginclass
 						code_part = line[:comment_pos].rstrip() 
 						existing_comment = line[comment_pos:] 
 						#  Add our begin comments before the existing comment
-						#begin_comment_str = " ".join(begin_comments)
+						begin_comment_str = " ".join(begin_comments) 
 						modified = f"{code_part} {begin_comment_str} {existing_comment}" 
 						self.result_lines.append(modified) 
 					else: 
 						#  No existing structure comments (or only in string literals)
+						begin_comment_str = " ".join(begin_comments) 
 						self.result_lines.append(f"{line} {begin_comment_str}") 
 						# endif
 				else: 
 					#  No existing comment, add to end
-					#begin_comment_str = " ".join(begin_comments)
+					begin_comment_str = " ".join(begin_comments) 
 					self.result_lines.append(f"{line} {begin_comment_str}") 
 					# endif
 			else: 
@@ -239,12 +238,11 @@ class CompleteStructureCommenter:# beginclass
 			
 				#  Sort end comments by their start line - this ensures proper nesting
 				#  Blocks that started later (higher start_line) should be closed first
-				sorted_end_comments = sorted(#// //
-				
-					self.end_comments[i], 
-					key=lambda x: x[2],#  Sort by start_line
-					reverse=True#  Later blocks should be closed first
-					)#// //
+				sorted_end_comments = sorted( 
+				self.end_comments[i], 
+				key=lambda x: x[2],#  Sort by start_line
+				reverse=True#  Later blocks should be closed first
+				) 
 				#  Add each end comment on its own line
 				for end_comment, indent, _ in sorted_end_comments:# beginfor
 					self.result_lines.append(f"{indent}{end_comment}") 
@@ -258,74 +256,66 @@ class CompleteStructureCommenter:# beginclass
 	# endclass
 #  Extended lists to include the new endif/endlif distinction
 Ends = [ 
-
-	"endfunc", 
-	"endmethod", 
-	"endclass", 
-	"endif", 
-	#"endlif",  # Added for elif statements# 0,  # Added for elif statements
-	"endwith", 
-	"endtry", 
-	"endfor", 
-	"endwhile", 
-	]#// //
-Begins = [#// //
-
-	"beginfunc", 
-	"beginmethod", 
-	"beginclass", 
-	"beginif", 
-	"beginelif",#  Added for elif statements
-	"begintry", 
-	"beginwith", 
-	"beginwhile", 
-	"beginfor", 
-	]#// //
+"endfunc", 
+"endmethod", 
+"endclass", 
+"endif", 
+#"endlif",  # Added for elif statements# 0,  # Added for elif statements
+"endwith", 
+"endtry", 
+"endfor", 
+"endwhile", 
+] 
+Begins = [ 
+"beginfunc", 
+"beginmethod", 
+"beginclass", 
+"beginif", 
+"beginelif",#  Added for elif statements
+"begintry", 
+"beginwith", 
+"beginwhile", 
+"beginfor", 
+] 
 #  Update the begin_type mapping to include beginelif
-begin_type = {#//// ////
-
-	"beginfunc": "input", 
-	"beginmethod": "input", 
-	"beginclass": "event", 
-	"beginif": "branch", 
-	"beginelif": "branch",#  Same type as beginif
-	"begintry": "branch", 
-	"beginwith": "branch", 
-	"beginwhile": "loop", 
-	"beginfor": "loop", 
-	}#// //
+begin_type = { 
+"beginfunc": "input", 
+"beginmethod": "input", 
+"beginclass": "input", 
+"beginif": "branch", 
+"beginelif": "branch",#  Same type as beginif
+"begintry": "branch", 
+"beginwith": "branch", 
+"beginwhile": "loop", 
+"beginfor": "loop", 
+} 
 #  Update the end_type mapping to include endlif
-end_type = {#// //
-
-	"endfunc": "end", 
-	"endmethod": "end", 
-	"endclass": "end", 
-	"endif": "bend", 
-	#"endlif": "bend",  # Same type as endif# 0: 0,  # Same type as endif
-	"endwith": "bend", 
-	"endtry": "bend", 
-	"endfor": "lend", 
-	"endwhile": "lend", 
-	}#// //
-path_type = [#// //
-
-	"elif",#  for if
-	"else",#  for if, try, loops
-	"except",#  for try
-	"finally",#  for try
-	]#// //
-event_type = [#// //
-
-	"import", 
-	"from", 
-	]#// //
-output_type = [#// //
-
-	"print", 
-	".write", 
-	]#// //
+end_type = { 
+"endfunc": "end", 
+"endmethod": "end", 
+"endclass": "end", 
+"endif": "bend", 
+#"endlif": "bend",  # Same type as endif# 0: 0,  # Same type as endif
+"endwith": "bend", 
+"endtry": "bend", 
+"endfor": "lend", 
+"endwhile": "lend", 
+} 
+path_type = [ 
+"elif",#  for if
+"else",#  for if, try, loops
+"except",#  for try
+"finally",#  for try
+] 
+event_type = [ 
+"import", 
+"from", 
+] 
+output_type = [ 
+"print", 
+".write", 
+] 
 VFCSEPERATOR = ';//' 
-
 def is_path(line: str) -> bool:# beginfunc
 	"""
 	Return True if the first word of the given line is one of the path type. 
@@ -335,7 +325,7 @@ def is_path(line: str) -> bool:# beginfunc
 	
 		return False 
 		# endif
-	if parts[0].lstrip().startswith(tuple(path_type)) :#if parts[0].strip(" :") in path_type:
+	if parts[0].strip(" :") in path_type:# beginif
 	
 		return True 
 		# endif
@@ -418,8 +408,6 @@ def generate_VFC(input_string):# beginfunc
 		if not string.strip():# beginif
 		
 			continue 
-		else:
-			string = ''.join(c if c.isascii() else ' ' for c in string)
 			# endif
 		code, comment = split_string(string) 
 		code = code.strip() 
@@ -430,8 +418,7 @@ def generate_VFC(input_string):# beginfunc
 		
 			VFC += f"bend(){VFCSEPERATOR}\n" 
 			# endif
-		
-		VFC += f'{type}({code}){VFCSEPERATOR} { comment.replace( marker, "" , 1 ) }\n'#// //
+		VFC += f'{type}({code}){VFCSEPERATOR} {comment}\n' 
 		## POST FIX TOKENS# # POST FIX TOKENS 
 		if type == "branch":# beginif
 		
@@ -456,18 +443,9 @@ def main():# beginfunc
 	commenter = CompleteStructureCommenter() 
 	modified_code = commenter.add_comments(args.input_file, args.output) 
 	VFC = generate_VFC(modified_code) 
-	root_filename = os.path.splitext(os.path.basename( args.input_file  ))[0]  + '.py'# ////
 	with open(args.input_file+'.vfc', 'w') as VFC_output:# beginwith
 	
 		VFC_output.write(VFC) 
-		VFC_output.write( 
-		";INSECTA EMBEDDED SESSION INFORMATION\n"+ 
-		"; 255 16777215 65280 16777088 16711680 13158600 16777088 0 255 255 65535 6946660 986895\n"+ 
-		f"; { root_filename }      #    '\n"+ 
-		"; notepad.exe\n"+ 
-		";INSECTA EMBEDDED ALTSESSION INFORMATION\n"+ 
-		"; 260 260 1130 1751 0 130   137   4294966452    python.key  0" 
-		)
 		# endwith
 	return modified_code 
 	# endfunc
@@ -475,5 +453,5 @@ if __name__ == '__main__':# beginif
 
 	t = main() 
 	# endif
-#  Export  Date: 08:13:13 PM - 30:Nov:2025.
+#  Export  Date: 11:39:13 AM - 25:May:2025.
 
