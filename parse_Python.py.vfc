@@ -1,8 +1,8 @@
 ;  IRL FlowCode Version: Version 10.0
 ;  c1995-2015: Visual Flow Coder by 2LResearch
 ;
-;  File Name : parse_Python.py.vfc
-;  File Date : 08:13:13 PM - 30:Nov:2025
+;  File Name : 6_parse_Python.py.vfc
+;  File Date : 08:49:13 PM - 07:Dec:2025
 
 event(import ast);// 
 event(import os);// 
@@ -343,7 +343,7 @@ branch(if not parts:);// beginif
 path();//
 set(return False);// 
 bend();// endif
-branch(if parts[0].lstrip().startswith(tuple(path_type)) :);//if parts[0].strip(" :") in path_type:
+branch(if parts[0].strip(" :") in path_type:);//if parts[0].lstrip().startswith(tuple(path_type)) :
 path();//
 set(return True);// 
 bend();// endif
@@ -410,8 +410,12 @@ bend();// endif
 set(parts = line.strip().split(None, 1));// 
 branch(if not parts:);// beginif
 path();//
-set(return "set");// 
+branch(if code.strip().startswith("print"):);//
+path();//
+set(return 'output');// 
 bend();// endif
+set(return "set");// 
+path(else: );//
 set(marker = parts[0]);// 
 branch(if marker in Begins:);// beginif
 path();//
@@ -421,7 +425,7 @@ branch(if marker in Ends:);// beginif
 path();//
 set(return end_type[marker]);// 
 bend();// endif
-set(return "set");// 
+bend();// endif
 end();// endfunc
 
 input(def generate_VFC(input_string):);// beginfunc
@@ -497,4 +501,4 @@ bend();// endif
 ;    parse_Python.py   #   .
 ; notepad.exe
 ;INSECTA EMBEDDED ALTSESSION INFORMATION
-; 415 906 2841 1194 0 130   1223   4294956808    python.key  0
+; 2010 597 1673 1273 396 130   640   4294953856    python.key  0
