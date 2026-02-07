@@ -462,12 +462,14 @@ def main():
     commenter = CompleteStructureCommenter()
     modified_code = commenter.add_comments(args.input_file, args.output)
     VFC = generate_VFC(modified_code)
+    target_file=os.path.basename( args.input_file );
+    
     with open(args.input_file + ".vfc", "w") as VFC_output:
         VFC_output.write(VFC)
        	VFC_output.write(
 		";INSECTA EMBEDDED SESSION INFORMATION\n"+
 		"; 255 16777215 65280 16777088 16711680 13158600 16777088 0 255 255 65535 6946660 986895\n"+
-		f"; { root_filename }      #    '\n"+
+		f"; { target_file }      #  ''' \n"+
 		"; notepad.exe\n"+
 		";INSECTA EMBEDDED ALTSESSION INFORMATION\n"+
 		"; 260 260 1130 1751 0 130   137   4294966452    python.key  0"
