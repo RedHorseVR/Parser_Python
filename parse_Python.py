@@ -7,7 +7,7 @@ from collections import defaultdict
 
 
 class CompleteStructureCommenter:
-    """A more robust Python structure commenter that handles multi-block endings."""
+    #     A more robust Python structure commenter that handles multi-block endings."""
 
     def __init__(self):
         self.source_lines = []
@@ -16,15 +16,14 @@ class CompleteStructureCommenter:
         self.end_comments = defaultdict(list)
 
     def add_comments(self, filename: str, output_filename: Optional[str] = None) -> str:
-        """Add structural comments to a Python file."""
+        #     Add structural comments to a Python file."""
         with open(filename, "r", encoding="utf-8") as f:
             content = f.read()
+
         return self.add_comments_to_string(content, output_filename)
 
-    def add_comments_to_string(
-        self, content: str, output_filename: Optional[str] = None
-    ) -> str:
-        """Add structural comments to a Python string."""
+    def add_comments_to_string(self, content: str, output_filename: Optional[str] = None) -> str:
+        #     Add structural comments to a Python string."""
         self.source_lines = content.splitlines()
 
         try:
@@ -47,14 +46,15 @@ class CompleteStructureCommenter:
         return modified_content
 
     def _get_indent(self, line_idx: int) -> str:
-        """Get the indentation of a line."""
+        #     Get the indentation of a line."""
         if line_idx < 0 or line_idx >= len(self.source_lines):
             return ""
+
         line = self.source_lines[line_idx]
         return line[: len(line) - len(line.lstrip())]
 
     def _collect_comments_for_node(self, node, node_type, begin_comment, end_comment):
-        """Collect begin and end comments for a specific node."""
+        #     Collect begin and end comments for a specific node."""
         if not hasattr(node, "lineno") or not hasattr(node, "end_lineno"):
             return
 
@@ -69,7 +69,7 @@ class CompleteStructureCommenter:
         self.end_comments[end_line].append((end_comment, indent, start_line))
 
     def _collect_comments(self, tree):
-        """First pass: collect all the begin/end comments."""
+        #     First pass: collect all the begin/end comments."""
         self.begin_comments = {}
         self.end_comments = defaultdict(list)
 
@@ -83,18 +83,12 @@ class CompleteStructureCommenter:
             if isinstance(node, ast.FunctionDef):
                 parent = parent_map.get(node)
                 if parent and isinstance(parent, ast.ClassDef):
-                    self._collect_comments_for_node(
-                        node, "method", "#beginmethod", "#endmethod"
-                    )
+                    self._collect_comments_for_node(node, "method", "#beginmethod", "#endmethod")
                 else:
-                    self._collect_comments_for_node(
-                        node, "function", "#beginfunc", "#endfunc"
-                    )
+                    self._collect_comments_for_node(node, "function", "#beginfunc", "#endfunc")
 
             elif isinstance(node, ast.ClassDef):
-                self._collect_comments_for_node(
-                    node, "class", "#beginclass", "#endclass"
-                )
+                self._collect_comments_for_node(node, "class", "#beginclass", "#endclass")
 
             elif isinstance(node, ast.If):
                 start_line = node.lineno - 1
@@ -102,13 +96,12 @@ class CompleteStructureCommenter:
                     line = self.source_lines[start_line].strip()
                     if line.startswith("elif"):
                         pass
-                        #self._collect_comments_for_node(
-                        #    node, "elif", "#path",  "#endpath"
-                        #)
+                        #    self._collect_comments_for_node(
+                        #        node, "elif", "#path",  "#endpath"
+                        #    )
                     else:
-                        self._collect_comments_for_node(
-                            node, "if", "#beginif", "#endif"
-                        )
+                        self._collect_comments_for_node(node, "if", "#beginif", "#endif")
+
                 else:
                     self._collect_comments_for_node(node, "if", "#beginif", "#endif")
 
@@ -116,9 +109,7 @@ class CompleteStructureCommenter:
                 self._collect_comments_for_node(node, "for", "#beginfor", "#endfor")
 
             elif isinstance(node, ast.While):
-                self._collect_comments_for_node(
-                    node, "while", "#beginwhile", "#endwhile"
-                )
+                self._collect_comments_for_node(node, "while", "#beginwhile", "#endwhile")
 
             elif isinstance(node, ast.With):
                 self._collect_comments_for_node(node, "with", "#beginwith", "#endwith")
@@ -165,10 +156,7 @@ class CompleteStructureCommenter:
 
                 if "#" in line and not line.strip().startswith("#"):
 
-                    should_skip = any(
-                        self._should_skip_comment(line, comment)
-                        for comment in begin_comments
-                    )
+                    should_skip = any(self._should_skip_comment(line, comment) for comment in begin_comments)  # // //
                     if should_skip:
 
                         comment_pos = line.find("#")
@@ -181,6 +169,7 @@ class CompleteStructureCommenter:
 
                         self.result_lines.append(f"{line} {begin_comment_str}")
 
+                    #    ////////
                 else:
 
                     self.result_lines.append(f"{line} {begin_comment_str}")
@@ -191,9 +180,7 @@ class CompleteStructureCommenter:
 
             if i in self.end_comments:
 
-                sorted_end_comments = sorted(
-                    self.end_comments[i], key=lambda x: x[2], reverse=True
-                )
+                sorted_end_comments = sorted(self.end_comments[i], key=lambda x: x[2], reverse=True)
 
                 for end_comment, indent, _ in sorted_end_comments:
                     self.result_lines.append(f"{indent}{end_comment}")
@@ -204,7 +191,7 @@ Ends = [
     "endmethod",
     "endclass",
     "endif",
-    # "endlif",
+    #     "endlif",
     "endwith",
     "endtry",
     "endfor",
@@ -239,7 +226,7 @@ end_type = {
     "endmethod": "end",
     "endclass": "end",
     "endif": "bend",
-    # "endlif": "bend",
+    #     "endlif": "bend",
     "endwith": "bend",
     "endtry": "bend",
     "endfor": "lend",
@@ -262,21 +249,22 @@ output_type = [
 VFCSEPERATOR = ";//"
 
 
-#def is_path(line: str) -> bool:
-#    parts = line.strip().split(None, 1)
-#    if not parts:
-#        return False
-#    return parts[0].strip(" :") in path_type
+#    def is_path(line: str) -> bool:
+#        parts = line.strip().split(None, 1)
+#        if not parts:
+#            return False
+#        return parts[0].strip(" :") in path_type
 #
+
 
 def is_path(line: str) -> bool:
     s = line.lstrip()
 
-    # Fast‑reject empty or comment‑only lines
+    #     Fastreject empty or commentonly lines
     if not s or s.startswith("#"):
         return False
 
-    # Extract the leading token up to the first whitespace or '('
+    #     Extract the leading token up to the first whitespace or '('
     i = 0
     n = len(s)
     while i < n and s[i] not in (" ", "\t", "(", ":"):
@@ -284,12 +272,10 @@ def is_path(line: str) -> bool:
 
     token = s[:i]
 
-    # Normalize by stripping trailing ':' if present
+    #     Normalize by stripping trailing ':' if present
     token = token.rstrip(":")
 
     return token in path_type
-
-
 
 
 def replace_string_literals(input_string):
@@ -304,15 +290,16 @@ def split_on_comment(input_string):
         s2 = input_string[match.start() :].rstrip("\n")
     else:
         s1, s2 = input_string.rstrip("\n"), ""
+
     return (s1, s2)
 
 
 def split_string(line: str):
-    """
-    Splits a line into (code, comment) while preserving exact comment text.
-    - Comment-only lines: code == "", comment is full line including '#'
-    - Code + comment lines: code is left side, comment is full '#...'
-    """
+    #
+    #    Splits a line into (code, comment) while preserving exact comment text.
+    #    - Comment-only lines: code == "", comment is full line including '#'
+    #    - Code + comment lines: code is left side, comment is full '#...'
+    #
     stripped = line.lstrip()
 
     if stripped.startswith("#"):
@@ -344,6 +331,7 @@ def get_marker(comment: str) -> str:
     parts = comment.strip().split(None, 1)
     if not parts:
         return "none"
+
     return parts[0]
 
 
@@ -359,20 +347,25 @@ def get_VFC_type(code: str, comment: str) -> Optional[str]:
     c = comment.lstrip()
     if c.startswith("#"):
         c = c[1:].lstrip()
+
     parts = c.split(None, 1)
     if parts:
         marker = parts[0]
         if marker in Begins:
             return begin_type[marker]
+
         if marker in Ends:
             return end_type[marker]
 
     if token in ("def", "class"):
         return "input"
+
     if token == "if":
         return "branch"
+
     if token in ("for", "while"):
         return "loop"
+
     if token in ("try", "with"):
         return "branch"
 
@@ -403,7 +396,7 @@ def generate_VFC(input_string):
 
         stripped = string.lstrip()
 
-        # Comment-only structural marker lines: treat like old structure
+        #     Comment-only structural marker lines: treat like old structure
         if stripped in STRUCT_COMMENT_LINES:
             comment = stripped[1:].lstrip()
             code = ""
@@ -426,12 +419,13 @@ def generate_VFC(input_string):
 
             continue
 
-        # Non-struct comment-only lines → set(#)
+        #     Non-struct comment-only lines  set(#)
         if stripped.startswith("#"):
             if len(stripped.rstrip()) == 1:
                 VFC += f"set(#){VFCSEPERATOR}{stripped[1:]}\n"
             else:
                 VFC += f"set(){VFCSEPERATOR} {stripped[1:]}\n"
+
             continue
 
         code, comment = split_string(string)
@@ -452,6 +446,7 @@ def generate_VFC(input_string):
                 tail = c_no_hash[len(marker) :].lstrip()
             else:
                 tail = c_no_hash
+
             out_comment = tail
         else:
             if c.startswith("#"):
@@ -478,28 +473,27 @@ def generate_VFC(input_string):
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(
-        description="Add structure comments to Python code"
-    )
+    parser = argparse.ArgumentParser(description="Add structure comments to Python code")
     parser.add_argument("input_file", help="Input Python file")
     parser.add_argument("-o", "--output", help="Output file (default: stdout)")
     args = parser.parse_args()
     commenter = CompleteStructureCommenter()
     modified_code = commenter.add_comments(args.input_file, args.output)
     VFC = generate_VFC(modified_code)
-    target_file=os.path.basename( args.input_file );
-    
-    with open(args.input_file + ".vfc", "w") as VFC_output:
-        VFC_output.write(VFC)
-       	VFC_output.write(
-		";INSECTA EMBEDDED SESSION INFORMATION\n"+
-		"; 255 16777215 65280 16777088 16711680 13158600 16777088 0 255 255 65535 6946660 986895\n"+
-		f"; { target_file }      #  ''' \n"+
-		"; notepad.exe\n"+
-		";INSECTA EMBEDDED ALTSESSION INFORMATION\n"+
-		"; 260 260 1130 1751 0 130   137   4294966452    python.key  0"
-		)
-		 
+    target_file = os.path.basename(args.input_file)
+
+    print(VFC)
+
+    footer = ";INSE" + "CTA EMBEDDED SESSION INFORMATION\n"
+    footer += "; 255 16777215 65280 16777088 16711680 13158600 8388863 0 255 255 8454143 6946660 3684381\n"
+    footer += f";    {target_file}   #   .\n"
+    footer += "; notepad.exe\n"
+    footer += ";INSE" + "CTA EMBEDDED ALTSESSION INFORMATION\n; 260 260 1121 964 0 130   569   58    python.key  0"
+
+    with open(args.input_file + ".vfc", "w", encoding="ascii", errors="ignore") as VFC_output:
+
+        VFC_output.write(VFC + footer)
+
     return modified_code
 
 
