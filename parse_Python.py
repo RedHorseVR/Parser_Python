@@ -212,7 +212,7 @@ Begins = [
 begin_type = {
     "beginfunc": "input",
     "beginmethod": "input",
-    "beginclass": "input",
+    "beginclass": "event",
     "beginif": "branch",
     "beginelif": "branch",
     "begintry": "branch",
@@ -340,6 +340,9 @@ def get_VFC_type(code: str, comment: str) -> Optional[str]:
 
     if token in event_type:
         return "event"
+
+    if code.startswith('@'):
+        return "input"
 
     if is_path(code):
         return "path"
