@@ -100,10 +100,11 @@ class CompleteStructureCommenter:
                 start_line = node.lineno - 1
                 if start_line < len(self.source_lines):
                     line = self.source_lines[start_line].strip()
-                    if line.startswith("elif "):
-                        self._collect_comments_for_node(
-                            node, "elif", "#beginelif", "#endlif"
-                        )
+                    if line.startswith("elif"):
+                        pass
+                        #self._collect_comments_for_node(
+                        #    node, "elif", "#path",  "#endpath"
+                        #)
                     else:
                         self._collect_comments_for_node(
                             node, "if", "#beginif", "#endif"
@@ -261,11 +262,34 @@ output_type = [
 VFCSEPERATOR = ";//"
 
 
+#def is_path(line: str) -> bool:
+#    parts = line.strip().split(None, 1)
+#    if not parts:
+#        return False
+#    return parts[0].strip(" :") in path_type
+#
+
 def is_path(line: str) -> bool:
-    parts = line.strip().split(None, 1)
-    if not parts:
+    s = line.lstrip()
+
+    # Fast‑reject empty or comment‑only lines
+    if not s or s.startswith("#"):
         return False
-    return parts[0].strip(" :") in path_type
+
+    # Extract the leading token up to the first whitespace or '('
+    i = 0
+    n = len(s)
+    while i < n and s[i] not in (" ", "\t", "(", ":"):
+        i += 1
+
+    token = s[:i]
+
+    # Normalize by stripping trailing ':' if present
+    token = token.rstrip(":")
+
+    return token in path_type
+
+
 
 
 def replace_string_literals(input_string):
@@ -374,6 +398,7 @@ def generate_VFC(input_string):
     for string in strings:
 
         if not string.strip():
+            VFC += f"generic(){VFCSEPERATOR}\n"
             continue
 
         stripped = string.lstrip()
