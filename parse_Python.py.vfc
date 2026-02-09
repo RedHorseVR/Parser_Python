@@ -1,0 +1,674 @@
+;  IRL FlowCode Version: Version 10.0
+;  c1995-2015: Visual Flow Coder by 2LResearch
+;
+;  File Name : parse_Python.py.vfc
+;  File Date : 05:47:26 PM - 09:Feb:2026
+
+event(import ast);// 
+event(import os);// 
+event(import sys);// 
+event(import re);// 
+event(from typing import List, Dict, Set, Optional, Tuple, Any);// 
+event(from collections import defaultdict);// 
+generic();//
+generic();//
+
+input(class CompleteStructureCommenter:);// 
+branch();//
+path();//
+path();//
+set();//     A more robust Python structure commenter that handles multi-block endings."""
+generic();//
+
+input(def __init__(self):);// 
+set(self.source_lines = []);// 
+set(self.result_lines = []);// 
+set(self.begin_comments = {});// 
+set(self.end_comments = defaultdict(list));// 
+end();// 
+generic();//
+
+input(def add_comments(self, filename: str, output_filename: Optional[str] = None) -> str:);// 
+set();//     Add structural comments to a Python file."""
+branch(with open(filename, "r", encoding="utf-8") as f:);// 
+path();//
+set(content = f.read());// 
+bend();// 
+generic();//
+set(return self.add_comments_to_string(content, output_filename));// 
+end();// 
+generic();//
+
+input(def add_comments_to_string(self, content: str, output_filename: Optional[str] = None) -> str:);// 
+set();//     Add structural comments to a Python string."""
+set(self.source_lines = content.splitlines());// 
+generic();//
+branch(try:);// 
+path();//
+set(clean_content = re.sub(r"\*([a-zA-Z0-9_]+)\*", r"\1", content));// 
+set(tree = ast.parse(clean_content));// 
+path(except SyntaxError as e:);// 
+set(print(f"Syntax error in input file: {e}"));// 
+set(input("enter to continue"));// 
+set(return content);// 
+bend();// 
+generic();//
+set(self._collect_comments(tree));// 
+set(self._apply_comments());// 
+generic();//
+set(modified_content = "\n".join(self.result_lines));// 
+generic();//
+branch(if output_filename:);// 
+path();//
+branch(with open(output_filename, "w", encoding="utf-8") as f:);// 
+path();//
+set(f.write(modified_content));// 
+bend();// 
+bend();// 
+generic();//
+set(return modified_content);// 
+end();// 
+generic();//
+
+input(def _get_indent(self, line_idx: int) -> str:);// 
+set();//     Get the indentation of a line."""
+branch(if line_idx < 0 or line_idx >= len(self.source_lines):);// 
+path();//
+set(return "");// 
+bend();// 
+generic();//
+set(line = self.source_lines[line_idx]);// 
+set(return line[: len(line) - len(line.lstrip())]);// 
+end();// 
+generic();//
+
+input(def _collect_comments_for_node(self, node, node_type, begin_comment, end_comment):);// 
+set();//     Collect begin and end comments for a specific node."""
+branch(if not hasattr(node, "lineno") or not hasattr(node, "end_lineno"):);// 
+path();//
+set(return);// 
+bend();// 
+generic();//
+set(start_line = node.lineno - 1);// 
+set(end_line = node.end_lineno - 1);// 
+set(indent = self._get_indent(start_line));// 
+generic();//
+branch(if start_line not in self.begin_comments:);// 
+path();//
+set(self.begin_comments[start_line] = []);// 
+bend();// 
+generic();//
+set(self.begin_comments[start_line].append(begin_comment));// 
+set(self.end_comments[end_line].append((end_comment, indent, start_line)));// 
+end();// 
+generic();//
+
+input(def _collect_comments(self, tree):);// 
+set();//     First pass: collect all the begin/end comments."""
+set(self.begin_comments = {});// 
+set(self.end_comments = defaultdict(list));// 
+generic();//
+set(parent_map = {});// 
+loop(for parent in ast.walk(tree):);// 
+loop(for child in ast.iter_child_nodes(parent):);// 
+set(parent_map[child] = parent);// 
+lend();// 
+lend();// 
+generic();//
+loop(for node in ast.walk(tree):);// 
+generic();//
+branch(if isinstance(node, ast.FunctionDef):);// 
+path();//
+set(parent = parent_map.get(node));// 
+branch(if parent and isinstance(parent, ast.ClassDef):);// 
+path();//
+set(self._collect_comments_for_node(node, "method", "#beginmethod", "#endmethod"));// 
+path(else:);// 
+set(self._collect_comments_for_node(node, "function", "#beginfunc", "#endfunc"));// 
+bend();// 
+generic();//
+path(elif isinstance(node, ast.ClassDef):);// 
+set(self._collect_comments_for_node(node, "class", "#beginclass", "#endclass"));// 
+generic();//
+path(elif isinstance(node, ast.If):);// 
+set(start_line = node.lineno - 1);// 
+branch(if start_line < len(self.source_lines):);// 
+path();//
+set(line = self.source_lines[start_line].strip());// 
+branch(if line.startswith("elif"):);// 
+path();//
+set(pass);// 
+set();//    self._collect_comments_for_node(
+set();//        node, "elif", "#path",  "#endpath"
+set();//    )
+path(else:);// 
+set(self._collect_comments_for_node(node, "if", "#beginif", "#endif"));// 
+bend();// 
+generic();//
+path(else:);// 
+set(self._collect_comments_for_node(node, "if", "#beginif", "#endif"));// 
+bend();// 
+generic();//
+path(elif isinstance(node, ast.For):);// 
+set(self._collect_comments_for_node(node, "for", "#beginfor", "#endfor"));// 
+generic();//
+path(elif isinstance(node, ast.While):);// 
+set(self._collect_comments_for_node(node, "while", "#beginwhile", "#endwhile"));// 
+generic();//
+path(elif isinstance(node, ast.With):);// 
+set(self._collect_comments_for_node(node, "with", "#beginwith", "#endwith"));// 
+generic();//
+path(elif isinstance(node, ast.Try):);// 
+set(self._collect_comments_for_node(node, "try", "#begintry", "#endtry"));// 
+bend();// 
+lend();// 
+end();// 
+generic();//
+
+input(def _should_skip_comment(self, line, comment_tag):);// 
+branch(if comment_tag not in line:);// 
+path();//
+set(return False);// 
+bend();// 
+generic();//
+set(str_positions = []);// 
+generic();//
+loop(for match in re.finditer(r'"[^"\\]*(?:\\.[^"\\]*)*"', line):);// 
+set(str_positions.append((match.start(), match.end())));// 
+lend();// 
+generic();//
+loop(for match in re.finditer(r"'[^'\\]*(?:\\.[^'\\]*)*'", line):);// 
+set(str_positions.append((match.start(), match.end())));// 
+lend();// 
+generic();//
+loop(for match in re.finditer(re.escape(comment_tag), line):);// 
+set(tag_start = match.start());// 
+set(tag_end = match.end());// 
+generic();//
+set(inside_string = False);// 
+loop(for str_start, str_end in str_positions:);// 
+branch(if str_start <= tag_start and tag_end <= str_end:);// 
+path();//
+set(inside_string = True);// 
+set(break);// 
+bend();// 
+lend();// 
+generic();//
+branch(if not inside_string:);// 
+path();//
+set(return True);// 
+bend();// 
+lend();// 
+generic();//
+set(return False);// 
+end();// 
+generic();//
+
+input(def _apply_comments(self):);// 
+set(self.result_lines = []);// 
+generic();//
+loop(for i, line in enumerate(self.source_lines):);// 
+generic();//
+branch(if i in self.begin_comments:);// 
+path();//
+generic();//
+set(begin_comments = self.begin_comments[i]);// 
+set(begin_comment_str = " ".join(begin_comments));// 
+generic();//
+branch(if "#" in line and not line.strip().startswith("#"):);// 
+path();//
+generic();//
+set(should_skip = any(self._should_skip_comment(line, comment) for comment in begin_comments));// // //
+branch(if should_skip:);// 
+path();//
+generic();//
+set(comment_pos = line.find("#"));// 
+set(code_part = line[:comment_pos].rstrip());// 
+set(existing_comment = line[comment_pos:]);// 
+generic();//
+set(modified = f"{code_part} {begin_comment_str} {existing_comment}");// 
+set(self.result_lines.append(modified));// 
+path(else:);// 
+generic();//
+set(self.result_lines.append(f"{line} {begin_comment_str}"));// 
+bend();// 
+generic();//
+set();//    ////////
+path(else:);// 
+generic();//
+set(self.result_lines.append(f"{line} {begin_comment_str}"));// 
+bend();// 
+generic();//
+path(else:);// 
+generic();//
+set(self.result_lines.append(line));// 
+bend();// 
+generic();//
+branch(if i in self.end_comments:);// 
+path();//
+generic();//
+set(sorted_end_comments = sorted(self.end_comments[i], key=lambda x: x[2], reverse=True));// 
+generic();//
+loop(for end_comment, indent, _ in sorted_end_comments:);// 
+set(self.result_lines.append(f"{indent}{end_comment}"));// 
+lend();// 
+bend();// 
+lend();// 
+end();// 
+bend();//
+end();// 
+generic();//
+generic();//
+set(Ends = [);// 
+set("endfunc",);// 
+set("endmethod",);// 
+set("endclass",);// 
+set("endif",);// 
+set();//     "endlif",
+set("endwith",);// 
+set("endtry",);// 
+set("endfor",);// 
+set("endwhile",);// 
+set(]);// 
+set(Begins = [);// 
+set("beginfunc",);// 
+set("beginmethod",);// 
+set("beginclass",);// 
+set("beginif",);// 
+set("beginelif",);// 
+set("begintry",);// 
+set("beginwith",);// 
+set("beginwhile",);// 
+set("beginfor",);// 
+set(]);// 
+generic();//
+set(begin_type = {);// 
+set("beginfunc": "input",);// 
+set("beginmethod": "input",);// 
+set("beginclass": "event",);// 
+set("beginif": "branch",);// 
+set("beginelif": "branch",);// 
+set("begintry": "branch",);// 
+set("beginwith": "branch",);// 
+set("beginwhile": "loop",);// 
+set("beginfor": "loop",);// 
+set(});// 
+generic();//
+set(end_type = {);// 
+set("endfunc": "end",);// 
+set("endmethod": "end",);// 
+set("endclass": "end",);// 
+set("endif": "bend",);// 
+set();//     "endlif": "bend",
+set("endwith": "bend",);// 
+set("endtry": "bend",);// 
+set("endfor": "lend",);// 
+set("endwhile": "lend",);// 
+set(});// 
+set(path_type = [);// 
+set("elif",);// 
+set("else",);// 
+set("except",);// 
+set("finally",);// 
+set(]);// 
+set(event_type = [);// 
+set("import",);// 
+set("from",);// 
+set(]);// 
+set(output_type = [);// 
+set("print",);// 
+set(".write",);// 
+set(]);// 
+set(VFCSEPERATOR = ";//");// 
+generic();//
+generic();//
+set();//    def is_path(line: str) -> bool:
+set();//        parts = line.strip().split(None, 1)
+set();//        if not parts:
+set();//            return False
+set();//        return parts[0].strip(" :") in path_type
+set(#);//
+generic();//
+generic();//
+
+input(def is_path(line: str) -> bool:);// 
+set(s = line.lstrip());// 
+generic();//
+set();//     Fastreject empty or commentonly lines
+branch(if not s or s.startswith("#"):);// 
+path();//
+set(return False);// 
+bend();// 
+generic();//
+set();//     Extract the leading token up to the first whitespace or '('
+set(i = 0);// 
+set(n = len(s));// 
+loop(while i < n and s[i] not in (" ", "\t", "(", ":"):);// 
+set(i += 1);// 
+lend();// 
+generic();//
+set(token = s[:i]);// 
+generic();//
+set();//     Normalize by stripping trailing ':' if present
+set(token = token.rstrip(":"));// 
+generic();//
+set(return token in path_type);// 
+end();// 
+generic();//
+generic();//
+
+input(def replace_string_literals(input_string):);// 
+set(result = re.sub(r'(["\'])(.*?)(\1)', "0", input_string));//
+set(return result);// 
+end();// 
+generic();//
+generic();//
+
+input(def split_on_comment(input_string):);// 
+set(match = re.search(r'(?<!")#.*$', input_string));//
+branch(if match:);// 
+path();//
+set(s1 = input_string[: match.start()].rstrip());// 
+set(s2 = input_string[match.start() :].rstrip("\n"));// 
+path(else:);// 
+set(s1, s2 = input_string.rstrip("\n"), "");// 
+bend();// 
+generic();//
+set(return (s1, s2));// 
+end();// 
+generic();//
+generic();//
+
+input(def split_string(line: str):);// 
+set(#);//
+set();//    Splits a line into (code, comment) while preserving exact comment text.
+set();//    - Comment-only lines: code == "", comment is full line including '#'
+set();//    - Code + comment lines: code is left side, comment is full '#...'
+set(#);//
+set(stripped = line.lstrip());// 
+generic();//
+branch(if stripped.startswith("#"):);// 
+path();//
+set(return "", stripped);// 
+bend();// 
+generic();//
+set(in_single = False);// 
+set(in_double = False);// 
+set(saw_code = False);// 
+generic();//
+loop(for i, ch in enumerate(line):);// 
+branch(if not saw_code and ch not in " \t":);// 
+path();//
+set(saw_code = True);// 
+bend();// 
+generic();//
+branch(if saw_code:);// 
+path();//
+branch(if ch == "'" and not in_double:);// 
+path();//
+set(in_single = not in_single);// 
+path(elif ch == '"' and not in_single:);//
+set(in_double = not in_double);// 
+bend();// 
+bend();// 
+generic();//
+branch(if ch == "#" and not in_single and not in_double:);// 
+path();//
+set(code = line[:i].rstrip());// 
+set(comment = line[i:].rstrip("\n"));// 
+set(return code, comment);// 
+bend();// 
+lend();// 
+generic();//
+set(return line.rstrip(), "");// 
+end();// 
+generic();//
+generic();//
+
+input(def get_marker(comment: str) -> str:);// 
+set(parts = comment.strip().split(None, 1));// 
+branch(if not parts:);// 
+path();//
+set(return "none");// 
+bend();// 
+generic();//
+set(return parts[0]);// 
+end();// 
+generic();//
+generic();//
+
+input(def get_VFC_type(code: str, comment: str) -> Optional[str]:);// 
+set(token = code.strip().split(None, 1)[0] if len(code) > 1 else "none");// 
+generic();//
+branch(if token in event_type:);// 
+path();//
+set(return "event");// 
+bend();// 
+generic();//
+branch(if code.startswith( '@' ) :);// 
+path();//
+set(return "input");// 
+bend();// 
+branch(if is_path(code):);// 
+path();//
+set(return "path");// 
+bend();// 
+generic();//
+set(c = comment.lstrip());// 
+branch(if c.startswith("#"):);// 
+path();//
+set(c = c[1:].lstrip());// 
+bend();// 
+generic();//
+set(parts = c.split(None, 1));// 
+branch(if parts:);// 
+path();//
+set(marker = parts[0]);// 
+branch(if marker in Begins:);// 
+path();//
+set(return begin_type[marker]);// 
+bend();// 
+generic();//
+branch(if marker in Ends:);// 
+path();//
+set(return end_type[marker]);// 
+bend();// 
+bend();// 
+generic();//
+branch(if token in ("def", "class"):);// 
+path();//
+set(return "input");// 
+bend();// 
+generic();//
+branch(if token == "if":);// 
+path();//
+set(return "branch");// 
+bend();// 
+generic();//
+branch(if token in ("for", "while"):);// 
+path();//
+set(return "loop");// 
+bend();// 
+generic();//
+branch(if token in ("try", "with"):);// 
+path();//
+set(return "branch");// 
+bend();// 
+generic();//
+set(return "set");// 
+end();// 
+generic();//
+generic();//
+set(STRUCT_COMMENT_LINES = {);// 
+set("#endfunc",);// 
+set("#endmethod",);// 
+set("#endclass",);// 
+set("#endif",);// 
+set("#endlif",);// 
+set("#endwith",);// 
+set("#endtry",);// 
+set("#endfor",);// 
+set("#endwhile",);// 
+set(});// 
+generic();//
+generic();//
+
+input(def generate_VFC(input_string):);// 
+set(strings = input_string.split("\n"));// 
+set(VFC = "");// 
+loop(for string in strings:);// 
+generic();//
+branch(if not string.strip():);// 
+path();//
+set(VFC += f"generic(){VFCSEPERATOR}\n");// 
+set(continue);// 
+bend();// 
+generic();//
+set(stripped = string.lstrip());// 
+generic();//
+set();//     Comment-only structural marker lines: treat like old structure
+branch(if stripped in STRUCT_COMMENT_LINES:);// 
+path();//
+set(comment = stripped[1:].lstrip());// 
+set(code = "");// 
+set(vtype = get_VFC_type(code, comment));// 
+set(marker = get_marker(comment));// 
+generic();//
+branch(if marker == "endclass":);// 
+path();//
+set(VFC += f"bend(){VFCSEPERATOR}\n");// 
+bend();// 
+generic();//
+set(out_comment = comment[len(marker) :].lstrip() if comment.startswith(marker) else comment);// 
+set(VFC += f"{vtype}({code}){VFCSEPERATOR} {out_comment}\n");// 
+generic();//
+branch(if vtype == "branch":);// 
+path();//
+set(VFC += f"path(){VFCSEPERATOR}\n");// 
+bend();// 
+generic();//
+branch(if marker == "beginclass":);// 
+path();//
+set(VFC += f"branch(){VFCSEPERATOR}\n");// 
+set(VFC += f"path(){VFCSEPERATOR}\n");// 
+set(VFC += f"path(){VFCSEPERATOR}\n");// 
+bend();// 
+generic();//
+set(continue);// 
+bend();// 
+generic();//
+set();//     Non-struct comment-only lines  set(#)
+branch(if stripped.startswith("#"):);// 
+path();//
+branch(if len(stripped.rstrip()) == 1:);// 
+path();//
+set(VFC += f"set(#){VFCSEPERATOR}{stripped[1:]}\n");// 
+path(else:);// 
+set(VFC += f"set(){VFCSEPERATOR} {stripped[1:]}\n");// 
+bend();// 
+generic();//
+set(continue);// 
+bend();// 
+generic();//
+set(code, comment = split_string(string));// 
+set(code = code.strip());// 
+set(vtype = get_VFC_type(code, comment));// 
+generic();//
+set(c = comment.lstrip());// 
+branch(if c.startswith("#"):);// 
+path();//
+set(c_no_hash = c[1:].lstrip());// 
+path(else:);// 
+set(c_no_hash = c);// 
+bend();// 
+generic();//
+set(marker = get_marker(c_no_hash));// 
+set(is_struct = marker in Begins or marker in Ends);// 
+generic();//
+branch(if is_struct:);// 
+path();//
+branch(if c_no_hash.startswith(marker):);// 
+path();//
+set(tail = c_no_hash[len(marker) :].lstrip());// 
+path(else:);// 
+set(tail = c_no_hash);// 
+bend();// 
+generic();//
+set(out_comment = tail);// 
+path(else:);// 
+branch(if c.startswith("#"):);// 
+path();//
+set(out_comment = c[1:].lstrip());// 
+path(else:);// 
+set(out_comment = comment.strip());// 
+bend();// 
+bend();// 
+generic();//
+branch(if is_struct and marker == "endclass":);// 
+path();//
+set(VFC += f"bend(){VFCSEPERATOR}\n");// 
+bend();// 
+generic();//
+set(VFC += f"{vtype}({code}){VFCSEPERATOR} {out_comment}\n");// 
+generic();//
+branch(if vtype == "branch":);// 
+path();//
+set(VFC += f"path(){VFCSEPERATOR}\n");// 
+bend();// 
+generic();//
+branch(if is_struct and marker == "beginclass":);// 
+path();//
+set(VFC += f"branch(){VFCSEPERATOR}\n");// 
+set(VFC += f"path(){VFCSEPERATOR}\n");// 
+set(VFC += f"path(){VFCSEPERATOR}\n");// 
+bend();// 
+lend();// 
+generic();//
+set(return VFC);// 
+end();// 
+generic();//
+generic();//
+
+input(def main():);// 
+event(import argparse);// 
+generic();//
+set(parser = argparse.ArgumentParser(description="Add structure comments to Python code"));// 
+set(parser.add_argument("input_file", help="Input Python file"));// 
+set(parser.add_argument("-o", "--output", help="Output file (default: stdout)"));// 
+set(args = parser.parse_args());// 
+set(commenter = CompleteStructureCommenter());// 
+set(modified_code = commenter.add_comments(args.input_file, args.output));// 
+set(VFC = generate_VFC(modified_code));// 
+set(target_file = os.path.basename(args.input_file));// 
+generic();//
+set(print(VFC));// 
+generic();//
+set(footer = ";INSE" + "CTA EMBEDDED SESSION INFORMATION\n");// 
+set(footer += "; 255 16777215 65280 16777088 16711680 13158600 8388863 0 255 255 8454143 6946660 3684381\n");// 
+set(footer += f";    {target_file}   #   .\n");// 
+set(footer += "; notepad.exe\n");// 
+set(footer += ";INSE" + "CTA EMBEDDED ALTSESSION INFORMATION\n; 260 260 1121 964 0 130   569   58    python.key  0");// 
+generic();//
+branch(with open(args.input_file + ".vfc", "w", encoding="ascii", errors="ignore") as VFC_output:);// 
+path();//
+generic();//
+set(VFC_output.write(VFC + footer));// 
+bend();// 
+generic();//
+set(return modified_code);// 
+end();// 
+generic();//
+generic();//
+branch(if __name__ == "__main__":);// 
+path();//
+set(t = main());// 
+bend();// 
+
+
+
+;INSECTA EMBEDDED SESSION INFORMATION
+; 255 16777215 65280 16777088 16711680 13158600 8388863 0 255 255 8454143 6946660 3684381
+;    parse_Python.py   #   .
+; notepad.exe
+;INSECTA EMBEDDED ALTSESSION INFORMATION
+; 265 601 1110 1368 0 130   547   4294959059    python.key  0
