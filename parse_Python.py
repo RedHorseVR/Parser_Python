@@ -7,7 +7,6 @@ from collections import defaultdict
 
 
 class CompleteStructureCommenter:
-    #     A more robust Python structure commenter that handles multi-block endings."""
 
     def __init__(self):
         self.source_lines = []
@@ -16,14 +15,14 @@ class CompleteStructureCommenter:
         self.end_comments = defaultdict(list)
 
     def add_comments(self, filename: str, output_filename: Optional[str] = None) -> str:
-        #     Add structural comments to a Python file."""
+
         with open(filename, "r", encoding="utf-8") as f:
             content = f.read()
 
         return self.add_comments_to_string(content, output_filename)
 
     def add_comments_to_string(self, content: str, output_filename: Optional[str] = None) -> str:
-        #     Add structural comments to a Python string."""
+
         self.source_lines = content.splitlines()
 
         try:
@@ -46,7 +45,7 @@ class CompleteStructureCommenter:
         return modified_content
 
     def _get_indent(self, line_idx: int) -> str:
-        #     Get the indentation of a line."""
+
         if line_idx < 0 or line_idx >= len(self.source_lines):
             return ""
 
@@ -54,7 +53,7 @@ class CompleteStructureCommenter:
         return line[: len(line) - len(line.lstrip())]
 
     def _collect_comments_for_node(self, node, node_type, begin_comment, end_comment):
-        #     Collect begin and end comments for a specific node."""
+
         if not hasattr(node, "lineno") or not hasattr(node, "end_lineno"):
             return
 
@@ -69,7 +68,7 @@ class CompleteStructureCommenter:
         self.end_comments[end_line].append((end_comment, indent, start_line))
 
     def _collect_comments(self, tree):
-        #     First pass: collect all the begin/end comments."""
+
         self.begin_comments = {}
         self.end_comments = defaultdict(list)
 
@@ -96,9 +95,7 @@ class CompleteStructureCommenter:
                     line = self.source_lines[start_line].strip()
                     if line.startswith("elif"):
                         pass
-                        #    self._collect_comments_for_node(
-                        #        node, "elif", "#path",  "#endpath"
-                        #    )
+
                     else:
                         self._collect_comments_for_node(node, "if", "#beginif", "#endif")
 
@@ -156,7 +153,7 @@ class CompleteStructureCommenter:
 
                 if "#" in line and not line.strip().startswith("#"):
 
-                    should_skip = any(self._should_skip_comment(line, comment) for comment in begin_comments)  # // //
+                    should_skip = any(self._should_skip_comment(line, comment) for comment in begin_comments)
                     if should_skip:
 
                         comment_pos = line.find("#")
@@ -169,7 +166,6 @@ class CompleteStructureCommenter:
 
                         self.result_lines.append(f"{line} {begin_comment_str}")
 
-                    #    ////////
                 else:
 
                     self.result_lines.append(f"{line} {begin_comment_str}")
@@ -191,7 +187,6 @@ Ends = [
     "endmethod",
     "endclass",
     "endif",
-    #     "endlif",
     "endwith",
     "endtry",
     "endfor",
@@ -226,7 +221,6 @@ end_type = {
     "endmethod": "end",
     "endclass": "end",
     "endif": "bend",
-    #     "endlif": "bend",
     "endwith": "bend",
     "endtry": "bend",
     "endfor": "lend",
@@ -249,22 +243,15 @@ output_type = [
 VFCSEPERATOR = ";//"
 
 
-#    def is_path(line: str) -> bool:
-#        parts = line.strip().split(None, 1)
-#        if not parts:
-#            return False
-#        return parts[0].strip(" :") in path_type
 #
 
 
 def is_path(line: str) -> bool:
     s = line.lstrip()
 
-    #     Fastreject empty or commentonly lines
     if not s or s.startswith("#"):
         return False
 
-    #     Extract the leading token up to the first whitespace or '('
     i = 0
     n = len(s)
     while i < n and s[i] not in (" ", "\t", "(", ":"):
@@ -272,7 +259,6 @@ def is_path(line: str) -> bool:
 
     token = s[:i]
 
-    #     Normalize by stripping trailing ':' if present
     token = token.rstrip(":")
 
     return token in path_type
@@ -296,9 +282,7 @@ def split_on_comment(input_string):
 
 def split_string(line: str):
     #
-    #    Splits a line into (code, comment) while preserving exact comment text.
-    #    - Comment-only lines: code == "", comment is full line including '#'
-    #    - Code + comment lines: code is left side, comment is full '#...'
+
     #
     stripped = line.lstrip()
 
@@ -335,6 +319,39 @@ def get_marker(comment: str) -> str:
     return parts[0]
 
 
+def has_colon_outside_literals(code):
+
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return False
+
+    for node in ast.walk(tree):
+        # Colon appears in these syntax structures:
+        if isinstance(node, ast.If):
+            return True
+
+        if isinstance(node, ast.For):
+            return True
+
+        if isinstance(node, ast.While):
+            return True
+
+        if isinstance(node, ast.FunctionDef):
+            return True
+
+        if isinstance(node, ast.ClassDef):
+            return True
+
+        if isinstance(node, ast.With):
+            return True
+
+        if isinstance(node, ast.Try):
+            return True
+
+    return False
+
+
 def get_VFC_type(code: str, comment: str) -> Optional[str]:
     token = code.strip().split(None, 1)[0] if len(code) > 1 else "none"
 
@@ -344,7 +361,13 @@ def get_VFC_type(code: str, comment: str) -> Optional[str]:
     if code.startswith('@'):
         return "input"
 
-    if is_path(code):
+    if is_path(code) and has_colon_outside_literals(code):
+        return "path"
+
+    if re.match(r'^\s*else\s*:', code):
+        return "path"
+
+    if re.match(r'^elif\s+', code) and code.strip().endswith(':'):
         return "path"
 
     c = comment.lstrip()
@@ -360,10 +383,13 @@ def get_VFC_type(code: str, comment: str) -> Optional[str]:
         if marker in Ends:
             return end_type[marker]
 
+    if token in ("return", "continue", "break"):
+        return "end"
+
     if token in ("def", "class"):
         return "input"
 
-    if token == "if":
+    if token == "if" and code.strip().endswith(':'):
         return "branch"
 
     if token in ("for", "while"):
@@ -399,7 +425,6 @@ def generate_VFC(input_string):
 
         stripped = string.lstrip()
 
-        #     Comment-only structural marker lines: treat like old structure
         if stripped in STRUCT_COMMENT_LINES:
             comment = stripped[1:].lstrip()
             code = ""
@@ -422,7 +447,6 @@ def generate_VFC(input_string):
 
             continue
 
-        #     Non-struct comment-only lines  set(#)
         if stripped.startswith("#"):
             if len(stripped.rstrip()) == 1:
                 VFC += f"set(#){VFCSEPERATOR}{stripped[1:]}\n"

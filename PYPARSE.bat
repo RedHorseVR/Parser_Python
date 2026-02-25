@@ -1,8 +1,11 @@
+echo off
 
+set BAT_FILE_PATH=%~dp0%
+prompt :
 
-set BAT_FILE_PATH=%CD%
+echo .................
 echo The absolute path of this batch file is: %BAT_FILE_PATH%
-
+echo .................
 
  
 echo off
@@ -20,7 +23,7 @@ for %%F in (%*) do (
     
     copy %%F %%~dpF\_!filename!
     
-    python.exe %CD%\parse_Python.py %%F
+    python.exe %BAT_FILE_PATH%parse_Python.py %%F
 
     start VFC2000 %%F.vfc -Reload
 )

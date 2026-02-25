@@ -2,7 +2,7 @@
 ;  c1995-2015: Visual Flow Coder by 2LResearch
 ;
 ;  File Name : parse_Python.py.vfc
-;  File Date : 05:47:26 PM - 09:Feb:2026
+;  File Date : 02:55:19 PM - 25:Feb:2026
 
 event(import ast);// 
 event(import os);// 
@@ -12,12 +12,11 @@ event(from typing import List, Dict, Set, Optional, Tuple, Any);//
 event(from collections import defaultdict);// 
 generic();//
 generic();//
-
-input(class CompleteStructureCommenter:);// 
+event(class CompleteStructureCommenter:);// 
 branch();//
 path();//
 path();//
-set();//     A more robust Python structure commenter that handles multi-block endings."""
+set();//      A more robust Python structure commenter that handles multi-block endings."""
 generic();//
 
 input(def __init__(self):);// 
@@ -29,7 +28,7 @@ end();//
 generic();//
 
 input(def add_comments(self, filename: str, output_filename: Optional[str] = None) -> str:);// 
-set();//     Add structural comments to a Python file."""
+set();//      Add structural comments to a Python file."""
 branch(with open(filename, "r", encoding="utf-8") as f:);// 
 path();//
 set(content = f.read());// 
@@ -40,7 +39,7 @@ end();//
 generic();//
 
 input(def add_comments_to_string(self, content: str, output_filename: Optional[str] = None) -> str:);// 
-set();//     Add structural comments to a Python string."""
+set();//      Add structural comments to a Python string."""
 set(self.source_lines = content.splitlines());// 
 generic();//
 branch(try:);// 
@@ -71,7 +70,7 @@ end();//
 generic();//
 
 input(def _get_indent(self, line_idx: int) -> str:);// 
-set();//     Get the indentation of a line."""
+set();//      Get the indentation of a line."""
 branch(if line_idx < 0 or line_idx >= len(self.source_lines):);// 
 path();//
 set(return "");// 
@@ -83,7 +82,7 @@ end();//
 generic();//
 
 input(def _collect_comments_for_node(self, node, node_type, begin_comment, end_comment):);// 
-set();//     Collect begin and end comments for a specific node."""
+set();//      Collect begin and end comments for a specific node."""
 branch(if not hasattr(node, "lineno") or not hasattr(node, "end_lineno"):);// 
 path();//
 set(return);// 
@@ -104,7 +103,7 @@ end();//
 generic();//
 
 input(def _collect_comments(self, tree):);// 
-set();//     First pass: collect all the begin/end comments."""
+set();//      First pass: collect all the begin/end comments."""
 set(self.begin_comments = {});// 
 set(self.end_comments = defaultdict(list));// 
 generic();//
@@ -138,9 +137,9 @@ set(line = self.source_lines[start_line].strip());//
 branch(if line.startswith("elif"):);// 
 path();//
 set(pass);// 
-set();//    self._collect_comments_for_node(
-set();//        node, "elif", "#path",  "#endpath"
-set();//    )
+set();//     self._collect_comments_for_node(
+set();//         node, "elif", "#path",  "#endpath"
+set();//     )
 path(else:);// 
 set(self._collect_comments_for_node(node, "if", "#beginif", "#endif"));// 
 bend();// 
@@ -233,7 +232,7 @@ generic();//
 set(self.result_lines.append(f"{line} {begin_comment_str}"));// 
 bend();// 
 generic();//
-set();//    ////////
+set();//     ////////
 path(else:);// 
 generic();//
 set(self.result_lines.append(f"{line} {begin_comment_str}"));// 
@@ -264,7 +263,7 @@ set("endfunc",);//
 set("endmethod",);// 
 set("endclass",);// 
 set("endif",);// 
-set();//     "endlif",
+set();//      "endlif",
 set("endwith",);// 
 set("endtry",);// 
 set("endfor",);// 
@@ -299,7 +298,7 @@ set("endfunc": "end",);//
 set("endmethod": "end",);// 
 set("endclass": "end",);// 
 set("endif": "bend",);// 
-set();//     "endlif": "bend",
+set();//      "endlif": "bend",
 set("endwith": "bend",);// 
 set("endtry": "bend",);// 
 set("endfor": "lend",);// 
@@ -322,11 +321,11 @@ set(]);//
 set(VFCSEPERATOR = ";//");// 
 generic();//
 generic();//
-set();//    def is_path(line: str) -> bool:
-set();//        parts = line.strip().split(None, 1)
-set();//        if not parts:
-set();//            return False
-set();//        return parts[0].strip(" :") in path_type
+set();//     def is_path(line: str) -> bool:
+set();//         parts = line.strip().split(None, 1)
+set();//         if not parts:
+set();//             return False
+set();//         return parts[0].strip(" :") in path_type
 set(#);//
 generic();//
 generic();//
@@ -334,13 +333,13 @@ generic();//
 input(def is_path(line: str) -> bool:);// 
 set(s = line.lstrip());// 
 generic();//
-set();//     Fastreject empty or commentonly lines
+set();//      Fastreject empty or commentonly lines
 branch(if not s or s.startswith("#"):);// 
 path();//
 set(return False);// 
 bend();// 
 generic();//
-set();//     Extract the leading token up to the first whitespace or '('
+set();//      Extract the leading token up to the first whitespace or '('
 set(i = 0);// 
 set(n = len(s));// 
 loop(while i < n and s[i] not in (" ", "\t", "(", ":"):);// 
@@ -349,7 +348,7 @@ lend();//
 generic();//
 set(token = s[:i]);// 
 generic();//
-set();//     Normalize by stripping trailing ':' if present
+set();//      Normalize by stripping trailing ':' if present
 set(token = token.rstrip(":"));// 
 generic();//
 set(return token in path_type);// 
@@ -381,9 +380,9 @@ generic();//
 
 input(def split_string(line: str):);// 
 set(#);//
-set();//    Splits a line into (code, comment) while preserving exact comment text.
-set();//    - Comment-only lines: code == "", comment is full line including '#'
-set();//    - Code + comment lines: code is left side, comment is full '#...'
+set();//     Splits a line into (code, comment) while preserving exact comment text.
+set();//     - Comment-only lines: code == "", comment is full line including '#'
+set();//     - Code + comment lines: code is left side, comment is full '#...'
 set(#);//
 set(stripped = line.lstrip());// 
 generic();//
@@ -434,6 +433,46 @@ bend();//
 generic();//
 set(return parts[0]);// 
 end();// 
+
+input(def has_colon_outside_literals(code):);// ////
+branch();// ////
+path(try:);//
+generic(tree = ast.parse(code) );// ////
+path(except SyntaxError:);// ////
+end(return False );// ////
+bend();//
+loop(for node in ast.walk(tree): );// ////
+generic(# Colon appears in these syntax structures: );// ////
+branch(if isinstance(node, ast.If):);// ////
+path();//
+end(return True );// ////
+bend();//
+branch(if isinstance(node, ast.For):);// ////
+path();//
+end(return True );// ////
+bend();//
+branch(if isinstance(node, ast.While):);// ////
+path();//
+end(return True );// ////
+bend();//
+branch(if isinstance(node, ast.FunctionDef):);// ////
+path();//
+end(return True );// ////
+bend();//
+branch(if isinstance(node, ast.ClassDef):);// ////
+path();//
+end(return True );// ////
+bend();//
+branch(if isinstance(node, ast.With):);// ////
+path();//
+end(return True );// ////
+bend();//
+branch(if isinstance(node, ast.Try):);// ////
+path();//
+end(return True );// ////
+bend();//
+lend();//
+end(return False );// ////
 generic();//
 generic();//
 
@@ -445,11 +484,20 @@ path();//
 set(return "event");// 
 bend();// 
 generic();//
-branch(if code.startswith( '@' ) :);// 
+branch(if code.startswith('@'):);// 
 path();//
 set(return "input");// 
 bend();// 
-branch(if is_path(code):);// 
+generic();//
+branch(if is_path(code) and has_colon_outside_literals(code) :);// 
+path();//
+set(return "path");// 
+bend();// 
+branch(if re.match(r'^\s*else\s*:', code)  :);// 
+path();//
+set(return "path");// 
+bend();// 
+branch(if re.match(r'^elif\s+', code )   and code.strip().endswith(':')  :);// 
 path();//
 set(return "path");// 
 bend();// 
@@ -475,12 +523,16 @@ set(return end_type[marker]);//
 bend();// 
 bend();// 
 generic();//
+branch(if token in ("return", "continue" , "break" ):);// 
+path();//
+set(return "end");// 
+bend();// 
 branch(if token in ("def", "class"):);// 
 path();//
 set(return "input");// 
 bend();// 
 generic();//
-branch(if token == "if":);// 
+branch(if token == "if" and code.strip().endswith(':'):);// if token == "if": #beginif
 path();//
 set(return "branch");// 
 bend();// 
@@ -526,7 +578,7 @@ bend();//
 generic();//
 set(stripped = string.lstrip());// 
 generic();//
-set();//     Comment-only structural marker lines: treat like old structure
+set();//      Comment-only structural marker lines: treat like old structure
 branch(if stripped in STRUCT_COMMENT_LINES:);// 
 path();//
 set(comment = stripped[1:].lstrip());// 
@@ -557,7 +609,7 @@ generic();//
 set(continue);// 
 bend();// 
 generic();//
-set();//     Non-struct comment-only lines  set(#)
+set();//      Non-struct comment-only lines  set(#)
 branch(if stripped.startswith("#"):);// 
 path();//
 branch(if len(stripped.rstrip()) == 1:);// 
@@ -671,4 +723,4 @@ bend();//
 ;    parse_Python.py   #   .
 ; notepad.exe
 ;INSECTA EMBEDDED ALTSESSION INFORMATION
-; 265 601 1110 1368 0 130   547   4294959059    python.key  0
+; 483 424 2112 1386 0 130   899   4294950668    python.key  0
