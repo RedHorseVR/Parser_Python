@@ -24,10 +24,11 @@ for %%F in (%*) do (
     copy %%F %%~dpF\_!filename!
     
     python.exe %BAT_FILE_PATH%parse_Python.py %%F
+	
+	echo --------------------------------
+	dir %%F.vfc
 
-    start VFC2000 %%F.vfc -Reload
+    start "C:\Program Files\VFCode\VFC1.0\VFC2000" %%F.vfc -Reload
 )
 
-PAUSE
-
-pause
+timeout /t 5 >nul

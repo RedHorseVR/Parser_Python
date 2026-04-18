@@ -2,7 +2,7 @@
 ;  c1995-2015: Visual Flow Coder by 2LResearch
 ;
 ;  File Name : parse_Python.py.vfc
-;  File Date : 02:55:19 PM - 25:Feb:2026
+;  File Date : 05:07:37 PM - 18:Apr:2026
 
 event(import ast);// 
 event(import os);// 
@@ -48,7 +48,7 @@ set(clean_content = re.sub(r"\*([a-zA-Z0-9_]+)\*", r"\1", content));//
 set(tree = ast.parse(clean_content));// 
 path(except SyntaxError as e:);// 
 set(print(f"Syntax error in input file: {e}"));// 
-set(input("enter to continue"));// 
+set( );//input("enter to continue")
 set(return content);// 
 bend();// 
 generic();//
@@ -723,4 +723,4 @@ bend();//
 ;    parse_Python.py   #   .
 ; notepad.exe
 ;INSECTA EMBEDDED ALTSESSION INFORMATION
-; 483 424 2112 1386 0 130   899   4294950668    python.key  0
+; 783 624 2112 1386 42 130   4294967096   4294965952    python.key  0
