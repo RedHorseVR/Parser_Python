@@ -380,7 +380,7 @@ def get_VFC_type(code: str, comment: str) -> Optional[str]:
     if is_path(code) and has_colon_outside_literals(code):
         return "path"
 
-    if re.match(r"^\s*else\s*:", code):
+    if re.match(r"^\s*else\s*:", code) or re.match(r"^\s*\bexcept\b", code):
         return "path"
 
     if re.match(r"^elif\s+", code) and code.strip().endswith(":"):

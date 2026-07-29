@@ -2,7 +2,7 @@
 ;  c1995-2015: Visual Flow Coder by 2LResearch
 ;
 ;  File Name : parse_Python.py.vfc
-;  File Date : 05:07:37 PM - 18:Apr:2026
+;  File Date : 12:00:38 AM - 29:Jul:2026
 
 event(import ast);// 
 event(import os);// 
@@ -493,7 +493,7 @@ branch(if is_path(code) and has_colon_outside_literals(code) :);//
 path();//
 set(return "path");// 
 bend();// 
-branch(if re.match(r'^\s*else\s*:', code)  :);// 
+branch(if re.match(r'^\s*else\s*:', code) or re.match(r'^\s*\bexcept\b', code)   :);// 
 path();//
 set(return "path");// 
 bend();// 
@@ -723,4 +723,4 @@ bend();//
 ;    parse_Python.py   #   .
 ; notepad.exe
 ;INSECTA EMBEDDED ALTSESSION INFORMATION
-; 783 624 2112 1386 42 130   4294967096   4294965952    python.key  0
+; 783 624 2112 1386 475 130   849   4294951272    python.key  0
