@@ -1,0 +1,16 @@
+# Zygote's own folders: this computer's things stay on this computer. Only each folder's README.md is tracked.
+/credentials/*
+!/credentials/README.md
+/logs/*
+!/logs/README.md
+/env/*
+!/env/README.md
+/user/*
+!/user/README.md
+!/user/projects/
+!/user/trash/
+/user/projects/*
+!/user/projects/README.md
+/user/trash/*
+!/user/trash/README.md
+*.lnk

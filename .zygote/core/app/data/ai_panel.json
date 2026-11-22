@@ -1,0 +1,27 @@
+{
+  "title": "AI",
+  "size": [980, 640],
+  "root": {"type": "column", "children": [
+    {"type": "row", "children": [
+      {"type": "choice", "id": "target", "tip": "Where the models are: this computer, or another computer that runs the LAN GPU worker"},
+      {"type": "text", "id": "address", "stretch": 1, "tip": "Local: Ollama at http://127.0.0.1:11434. Worker: its address, like http://192.168.1.20:11435"},
+      {"type": "button", "id": "refresh", "action": "refresh", "tip": "Ask the chosen place what models it has and what is in the GPU (after that this button says Refresh)"},
+      {"type": "button", "id": "unload_all", "label": "Unload all", "action": "unload_all", "tip": "Take every model out of the GPU (asks first)"}
+    ]},
+    {"type": "label", "id": "status", "wrap": true},
+    {"type": "table", "id": "models", "action": "toggle", "columns": ["Model", "Params", "Disk", "Capabilities", "GPU memory"], "stretch": 1},
+    {"type": "group", "label": "Try a model", "children": [
+      {"type": "row", "children": [
+        {"type": "choice", "id": "model", "tip": "A dot marks the models that are loaded now (they are first). Another one is loaded first, after asking."},
+        {"type": "text", "id": "prompt", "stretch": 1, "placeholder": "One question for the chosen model…", "action": "send"},
+        {"type": "check", "id": "recycle", "label": "Recycle", "tip": "Ticked: the last answer is sent along with the question, and the new answer is added under it"},
+        {"type": "button", "id": "send", "label": "Send", "action": "send"}
+      ]},
+      {"type": "output", "id": "answer", "min_height": 170},
+      {"type": "row", "children": [
+        {"type": "stretch"},
+        {"type": "button", "id": "clear_answer", "label": "Clear answer", "action": "clear_answer", "tip": "Empty the answer box (and what Recycle would send)"}
+      ]}
+    ]}
+  ]}
+}

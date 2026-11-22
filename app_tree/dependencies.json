@@ -1,0 +1,17 @@
+{
+ "project": "Parser_Python",
+ "about": "What a deployed Parser_Python needs. Zygote's Deploy reads this file: every entry with kind required is copied and cannot be unticked; every entry with kind optional is offered, unticked. Paths are from the project folder (the one that holds app). type: folder, file, or runtime (not copied: checked on the computer). imports (optional): the module names the program imports from outside its own app folder and outside the Python standard library.",
+ "dependencies": [
+  {"name": "Parser program", "type": "folder", "path": "app", "kind": "required", "why": "parse_Python.py and the modules it imports (FlowFile, PyComments, PyToFlow, FlowToPy, RoundTrip)"},
+  {"name": "Version", "type": "file", "path": ".zygote/VERSION.txt", "kind": "required", "why": "the release number"},
+  {"name": "Black", "type": "runtime", "path": "pip package black", "kind": "required", "why": "the parser writes the source in Black's shape before it reads it, and the check compares both sides after Black; without it the parser says so and stops", "imports": ["black"]},
+  {"name": "Sample files", "type": "folder", "path": "test_files", "kind": "optional", "why": "Python files to try the parser on"},
+  {"name": "Tests", "type": "folder", "path": "app_tree/tests", "kind": "optional", "why": "the test suite (RUN_TESTS)"},
+  {"name": "Notes", "type": "folder", "path": "app_tree/notes", "kind": "optional", "why": "release notes and the exporter sync note"},
+  {"name": "Project guides", "type": "file", "path": "START_HERE.md", "kind": "optional", "why": "the hand-over file for a developer"}
+ ],
+ "never_copied": [
+  ".zygote/user",
+  "any file.py.roundtrip.txt left by a run that was not perfect"
+ ]
+}

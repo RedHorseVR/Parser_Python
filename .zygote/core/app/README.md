@@ -1,0 +1,2 @@
+# app/
+Zygote itself. `main.py` starts the window (`--project <folder>` opens a project directly); `bootstrap.py` builds the Python environment (`env\`) before it, behind a small status window. `ui_ux\` is the Qt window (PySide6), `functional\` is everything the window does that is not drawing, and `data\` is reserved for data Zygote ships with. There is no server: `app\server\` was removed at hatching.
