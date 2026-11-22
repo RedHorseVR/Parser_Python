@@ -43,7 +43,7 @@ from ui_ux.toast import Toast
 from ui_ux.panels import PictureButton, TitledPanel
 from ui_ux.shell_tabs import BottomTabs, ShellPage, ShellWindow, TabGhost, close_button
 from ui_ux.theme import Theme
-from ui_ux.folder_views import FolderDetails, FolderIcons, PathBar
+from ui_ux.folder_views import FolderDetails, FolderIcons, PathBar, UpButton
 from ui_ux.recycle import TrashWindow, bin_icon
 from ui_ux.zoom import IconZoomFilter, TreeZoomFilter
 
@@ -147,7 +147,7 @@ class MainWindow(QMainWindow):
         self.folder_title = PathBar()                             # the clickable path; the folder in view is plain text
         self.folder_title.chosen.connect(lambda path: self.guarded(functools.partial(self.open_inside, path)))
         self.icon_panel.set_title_widget(self.folder_title)
-        self.up_button = QPushButton()                            # one level up (the picture app_tree\\assets\\ui\\up_folder.png); grey at the project's root
+        self.up_button = UpButton()                            # one level up (the picture app_tree\\assets\\ui\\up_folder.png); grey at the project's root
         up_picture = QIcon(str(core.ui_picture('up_folder.png')))                  # at the project's root (button off): a blank grey folder
         up_picture.addPixmap(QPixmap(str(core.ui_picture('up_folder_root.png'))), QIcon.Disabled)
         self.up_button.setIcon(up_picture)
@@ -156,6 +156,8 @@ class MainWindow(QMainWindow):
         self.up_button.setToolTip('Up one folder')
         self.up_button.setFixedSize(28, 24)
         self.up_button.clicked.connect(lambda: self.guarded(self.go_up))
+        self.up_button.setToolTip('Up one folder (drop green items here to move them up)')
+        self.up_button.movedOut.connect(lambda paths: self.guarded(functools.partial(self.move_up, paths)))
         self.icon_panel.add_left_widget(self.up_button)
         self.before_zip = None                                    # the sort and view to go back to after the zip folder
         self.sort_box = QComboBox()
@@ -314,6 +316,7 @@ class MainWindow(QMainWindow):
         self.icon_model.setFilter(QDir.AllEntries | QDir.Hidden | QDir.NoDotAndDotDot)
         for model in (self.tree_model, self.icon_model):
             model.directoryLoaded.connect(self.folder_loaded)
+        self.icon_model.moveDropped.connect(lambda paths, folder: self.guarded(functools.partial(self.move_paths, paths, folder)))     # green items dropped on a folder
         self.icon_model.binDropped.connect(lambda paths: self.guarded(functools.partial(self.trash_paths, paths)))     # a green item dropped on the bin row
         self.icon_model.renameWanted.connect(lambda path, name: self.guarded(functools.partial(self.rename_item, path, name)))      # a name typed in the view
         self.icon_model.directoryLoaded.connect(self.start_pending_rename)
@@ -1597,6 +1600,29 @@ class MainWindow(QMainWindow):
             self.say(f'Renamed {Path(path).name} to {target.name}.')
         self.icon_model.reload(str(Path(path).parent))
 
+    def move_paths(self, paths, folder):
+        """Green files and folders dropped on a folder are moved into it. Nothing is replaced; a refusal names the item and nothing moves."""
+        project = self.need_project()
+        try:
+            made = core.move_into(project, paths, folder)
+        except core.ZygoteError as error:
+            self.say(str(error))
+            return []
+        if made:
+            for name in self.debugger.close_files(paths):
+                self.say(f'Closed the tab of {Path(name).name}: the file was moved. View it again.')
+            self.say(f'Moved {len(made)} item(s) into {Path(folder).name}.')
+        for place in {str(Path(path).parent) for path in paths} | {str(folder)}:
+            self.icon_model.reload(place)
+        return made
+
+    def move_up(self, paths):
+        """Green items dropped on the up button: moved into the folder above the one in view."""
+        current = Path(self.icon_model.filePath(self.icons.rootIndex())) if self.icons.rootIndex().isValid() else None
+        if current is None or current.parent == current:
+            return []
+        return self.move_paths(paths, str(current.parent))
+
     def trash_action(self, menu, path):
         """Delete (to the trash) for the items that may be thrown away: never the sacred or system ones."""
         if self.project is not None and core.can_trash(self.project, path):
@@ -2213,6 +2239,17 @@ class MainWindow(QMainWindow):
                 self.say(f'Wrote zip\\{path.name}: {count} files' + (f' (with {" and ".join(included)})' if included else ''))
         core.show_in_explorer(written[0])                     # the press must show a result: the zip folder opens with the new file selected
 
+    def ask_replace_deploy(self, names):
+        """The deploy folder holds an earlier program (and the folder it made when it was run there). 'delete' wipes all of it, 'backup' moves it into the zip folder,
+        None = cancel. Tests replace this."""
+        box = QMessageBox(QMessageBox.Question, 'Zygote', f'The deploy folder already holds: {", ".join(names)}.\n\nThe new program replaces all of it, including the home folder '
+                          'and every file in it.', QMessageBox.NoButton, self)
+        delete = box.addButton('Delete it', QMessageBox.AcceptRole)
+        backup = box.addButton('Back it up first', QMessageBox.AcceptRole)
+        box.addButton('Cancel', QMessageBox.RejectRole)
+        box.exec()
+        return 'delete' if box.clickedButton() is delete else 'backup' if box.clickedButton() is backup else None
+
     def ask_deploy(self, project, plan):
         """Deploy was pressed: the requirements file and the window choice. (requirements, window, args, ticked), or None when cancelled. Tests replace this."""
         from functional import deploy as deploying
@@ -2229,10 +2266,16 @@ class MainWindow(QMainWindow):
             self.say('Cancelled: nothing deployed')
             return
         deploying.save_settings(project, *choice)
-        dest = deploying.exe_path(project)
-        if dest.exists() and not self.ask_overwrite(dest):
-            self.say(f'Cancelled: {dest.name} left alone')
-            return
+        old = deploying.old_output(project)
+        if old:                                                # the exe AND its home folder go together: a home left behind would start stale files
+            answer = self.ask_replace_deploy([path.name for path in old])
+            if answer is None:
+                self.say(f'Cancelled: {", ".join(path.name for path in old)} left alone')
+                return
+            if answer == 'backup':
+                self.say(f'Earlier deploy moved to {deploying.backup_old(project)}')
+            else:
+                self.say(f'Earlier deploy removed: {", ".join(deploying.remove_old(project))}')
         self.say('Making the program (one compiler run, a few seconds)…')
         path, count = deploying.build(project)
         self.refresh()
@@ -2246,20 +2289,58 @@ class MainWindow(QMainWindow):
         return box.exec() == QMessageBox.Yes
 
     def refuse_drop(self, judged):
-        """A dropped build that is not an update of this project: said loudly and not unpacked. There is no Yes. Tests replace this."""
-        box = QMessageBox(QMessageBox.Critical, 'Zygote - not an update of this project', '', QMessageBox.Ok, self)
+        """A dropped build that is not an update of this project: said loudly and not unpacked. When it is another project's build, a second button offers to open it as a
+        new project (True is returned for it). Tests replace this."""
+        box = QMessageBox(QMessageBox.Critical, 'Zygote - not an update of this project', '', QMessageBox.NoButton, self)
         box.setTextFormat(Qt.RichText)
-        box.setText(f'<span style="color:#000000; font-weight:bold;">{html.escape(judged["text"]).replace(chr(10), "<br>")}</span>')      # black on the teal: more contrast than white
+        box.setText(f'<b>{html.escape(judged["text"]).replace(chr(10), "<br>")}</b>')      # no colour of its own: the dialog's words follow the brightness of the person's colour (theme)
+        new = box.addButton('Open as a new project', QMessageBox.AcceptRole) if judged.get('new_project') else None
+        ok = box.addButton('OK', QMessageBox.RejectRole)
+        box.setDefaultButton(ok)
         box.exec()
+        return new is not None and box.clickedButton() is new
+
+    def ask_new_project_place(self, zip_path, name):
+        """Where the new project's folder goes: the person picks the folder it is made in (the folder NAME is made inside it). None = cancelled. Tests replace this."""
+        desktop = Path.home() / 'Desktop'
+        start = str(desktop if desktop.is_dir() else Path(zip_path).parent)
+        chosen = QFileDialog.getExistingDirectory(self, f'Where should the new project {name} go? A folder called {name} is made inside the one you pick '
+                                                  f'(one that is there already is moved aside, never deleted).', start)
+        return Path(chosen) if chosen else None
+
+    def open_zip_as_new_project(self, zip_path):
+        """A build ZIP becomes a project of its own: asks where, unpacks there (an old folder of that name is moved aside, never deleted), opens it. With no project open it
+        opens in this window; otherwise in a window of its own. This window's project is never written to."""
+        zip_path = Path(zip_path)
+        plan = core.inspect_zip(zip_path)
+        name = core.new_project_name(plan)
+        parent = self.ask_new_project_place(zip_path, name)
+        if parent is None:
+            self.say(f'Cancelled: {zip_path.name} was not opened as a project.')
+            return None
+        if self.project is not None and (parent / name).resolve() == Path(self.project).resolve():
+            raise core.ZygoteError(f'{name} here is the project that is open now. Pick another folder for the new project.')
+        dest, old = core.unpack_new_project(zip_path, parent)
+        if old is not None:
+            self.say(f'The folder {name} was already there: moved to {old.name} beside it (delete it when you no longer need it).')
+        self.say(f'{zip_path.name} unpacked as the new project {dest}.')
+        if self.project is None:
+            self.drop_project(dest)
+        else:
+            self.open_in_own_window(dest)
+        return dest
 
     def install_zip(self, zip_path):
         """Take in one build ZIP. The guard judges it first (another project's build is refused, an older version is asked about); raises on any problem."""
-        project = self.need_project()
+        if self.project is None:                                # nothing to update: the ZIP can only become a project of its own
+            return self.open_zip_as_new_project(zip_path)
+        project = self.project
         plan = core.inspect_zip(zip_path)
         judged = core.check_drop(project, plan)
         if judged['verdict'] == 'refuse':
             self.say(f'Refused: {Path(zip_path).name} is not an update of this project. Nothing was unpacked.')
-            self.refuse_drop(judged)
+            if self.refuse_drop(judged):
+                return self.open_zip_as_new_project(zip_path)
             return None
         if judged['verdict'] != 'ok' and not self.ask_drop(judged):
             self.say(f'Cancelled: {Path(zip_path).name} left alone')

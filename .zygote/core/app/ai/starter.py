@@ -11,6 +11,7 @@ SKIP_FOLDERS = {'.git', '__pycache__', 'node_modules', '.venv', 'venv', 'env', '
 SCAN_LIMIT = 3000                                           # more files than this: the list is cut and the panel says so
 GROUP_SIZE = 30                                             # files per question to the model
 ARROW = '=>'
+AGENT = 'Project starter agent'                              # its name in ai/agents.py and in the prompt data
 CODE_SUFFIXES = ('.py', '.pyw')
 # What the rules decide without asking the model: the layout folder for each kind of file. A folder that holds any Python goes into app/ WHOLE (its
 # notes and data stay with its code, so the imports and the relative paths keep working); another folder goes where ALL its files agree.
@@ -107,15 +108,15 @@ def unit_line(name, files):
     return f'{name}  (folder, {len(files)} files: ' + ', '.join(f'{kind} {count}' for kind, count in sorted(kinds.items(), key=lambda item: -item[1])[:6]) + ')'
 
 
-def build_prompt(overview_text, lines, goal=''):
+def build_prompt(overview_text, lines, goal='', template=None):
+    """The question for one group. The words around the facts are DATA (ai/prompts.py: the standard text, or the one the person saved with Realign); the facts are put in here."""
+    from ai import prompts
     layout = '\n'.join(f'{folder}  = {use}' for folder, use in LAYOUT)
     extra = f'\nWhat the person says about this project: {goal}\n' if goal.strip() else ''
-    return (f'You sort the top-level items (files and folders) of a software project into the folder layout of a new project. A folder moves as ONE piece, '
-            f'with everything in it.\n\nThe layout (the only places an item may go):\n{layout}\n\n'
-            f'{overview_text}{extra}\n'
-            f'Answer with one line per item, exactly like this:\nname {ARROW} app_tree/notes/\n'
-            f'Copy the item name exactly as written below, and give the layout folder it goes into (ending with a slash). Use every item once. '
-            f'No other text, no explanations.\n\nItems:\n' + '\n'.join(lines) + '\n')
+    text = template if template is not None else prompts.default_text(AGENT)
+    for word, value in (('{layout}', layout), ('{overview}', overview_text), ('{extra}', extra), ('{arrow}', ARROW), ('{items}', '\n'.join(lines))):
+        text = text.replace(word, value)
+    return text
 
 
 def clean(line):
@@ -218,8 +219,8 @@ class StarterRun:
     """Asks the model one group at a time (each answer starts the next question). progress(done_groups, total_groups, text) after every answer;
     finished(plan, error) at the end (error None when all groups were asked). stop() ends it after the answer in flight. `ollama` is ai.ollama.Ollama."""
 
-    def __init__(self, ollama, model, files, progress, finished, goal=''):
-        self.ollama, self.model, self.files, self.goal = ollama, model, files, goal
+    def __init__(self, ollama, model, files, progress, finished, goal='', template=None):
+        self.ollama, self.model, self.files, self.goal, self.template = ollama, model, files, goal, template
         self.progress, self.finished = progress, finished
         self.plan = Plan(files)
         self.plan.place_by_rule()
@@ -244,7 +245,7 @@ class StarterRun:
     def ask(self):
         group = self.pending[self.index]
         self.progress(self.index, self.total, f'Asking {self.model} about items {self.index * GROUP_SIZE + 1} to {self.index * GROUP_SIZE + len(group)} of {len(self.asked)}…')
-        self.ollama.generate(self.model, build_prompt(overview(self.files), self.plan.unit_lines(group), self.goal), lambda ok, data: self.answered(group, ok, data),
+        self.ollama.generate(self.model, build_prompt(overview(self.files), self.plan.unit_lines(group), self.goal, self.template), lambda ok, data: self.answered(group, ok, data),
                              options={'temperature': 0, 'num_ctx': 8192}, keep_alive=-1)
 
     def answered(self, group, ok, data):

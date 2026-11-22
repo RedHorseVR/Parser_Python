@@ -5,7 +5,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Signal, QProcess, QProcessEnvironment, Qt
 from PySide6.QtGui import QAction, QColor, QPixmapCache, QGuiApplication, QIcon, QImage, QKeySequence, QPixmap, QTextCursor
-from PySide6.QtWidgets import (QWidget, QAbstractItemView, QCheckBox, QComboBox, QGroupBox, QMessageBox, QPlainTextEdit, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGridLayout, QHBoxLayout,
+from PySide6.QtWidgets import (QWidget, QAbstractItemView, QCheckBox, QComboBox, QScrollArea, QGroupBox, QMessageBox, QPlainTextEdit, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGridLayout, QHBoxLayout,
                                QColorDialog, QInputDialog, QLabel, QLineEdit, QPushButton, QRadioButton, QTableWidget, QTableWidgetItem, QVBoxLayout)
 
 import crashlog
@@ -1147,65 +1147,90 @@ class MakeZipDialog(QDialog):
 
 
 class DeployDialog(QDialog):
-    """Deploy: one short question before the package is made. The requirements file (empty = the program needs no packages) and whether the program has its
-    own window. Result after accept(): .requirements (text, may be empty), .window (bool), .args (text), .ticked (names of the top-level items to carry). Nothing is made by opening this."""
+    """Deploy: the questions before the package is made. Top: the options (own window or console) and where the exe goes. Then the optional items (unticked), the
+    requirements file when the project has one, and at the bottom every ticked item in groups (the program, assets, versions, Zygote core components), then what is only
+    checked on the computer. The tests, notes and hand-over file are never offered. Result after accept(): .requirements (relative path or ''), .window (bool), .args
+    (kept as saved; the deployed program's arguments are set in its runner), .ticked (keys of the items to carry). Nothing is made by opening this."""
+    BIGGER = 3                                                 # points added to the font: readable on a laptop
 
     def __init__(self, project, plan, saved, parent=None):
         super().__init__(parent)
         from functional import deploy
         self.requirements, self.window, self.args, self.ticked = saved['requirements'], saved['window'], saved['args'], []
         self.setWindowTitle('Zygote — deploy')
-        self.setMinimumWidth(560)
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(f'Deploy makes ONE program (an exe) with {plan["name"]} inside. On another computer it unpacks the folder '
-                                f'{deploy.home_name(project)} beside itself, makes the environment when one is needed, and starts {plan["entry"]}.'))
-        layout.itemAt(0).widget().setWordWrap(True)
-        layout.addWidget(QLabel('Requirements file inside the project (leave empty when the program needs no extra packages):'))
-        self.requirements_edit = QLineEdit(saved['requirements'])
-        self.requirements_edit.setPlaceholderText('for example requirements.txt')
-        layout.addWidget(self.requirements_edit)
-        layout.addWidget(QLabel('Arguments the deployed program starts with (leave empty: the Runtime test arguments never travel):'))
-        self.args_edit = QLineEdit(saved['args'])
-        layout.addWidget(self.args_edit)
-        layout.addWidget(QLabel('What goes in. Locked = the program needs it (the project says why). Unticked = optional, your choice:'))
-        self.item_boxes = {}
-        for one in deploy.choices(project):
-            box = QCheckBox(one['label'])
-            box.setChecked(one['ticked'])
-            box.setEnabled(not one['required'])
-            box.setToolTip(one['why'])
-            self.item_boxes[one['key']] = box
-            layout.addWidget(box)
-            if one['why']:
-                why = QLabel(one['why'])
-                why.setWordWrap(True)
-                why.setStyleSheet('color: gray; margin-left: 22px;')
-                layout.addWidget(why)
-        needs = deploy.runtime_needs(project)
-        if needs:
-            layout.addWidget(QLabel('Not copied, checked on the computer:'))
-            for name, what, kind, why in needs:
-                note = QLabel(f'{name}: {what} ({kind}). {why}')
-                note.setWordWrap(True)
-                note.setStyleSheet('color: gray; margin-left: 22px;')
-                layout.addWidget(note)
+        font = self.font()
+        font.setPointSizeF(max(font.pointSizeF(), 9) + self.BIGGER)
+        self.setFont(font)
+        self.setMinimumSize(780, 560)
+        outer = QVBoxLayout(self)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        body = QWidget()
+        layout = QVBoxLayout(body)
+        scroll.setWidget(body)
+        outer.addWidget(scroll, 1)
+        intro = QLabel(f'Deploy makes ONE program (an exe) with {plan["name"]} inside. On another computer it unpacks the folder '
+                       f'{deploy.home_name(project)} beside itself, makes the environment when one is needed, and starts {plan["entry"]}.')
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+        layout.addWidget(self.heading('Options'))
         self.window_box = QCheckBox('The program has its own window (no console window)')
         self.window_box.setChecked(saved['window'])
         layout.addWidget(self.window_box)
-        where = QLabel(f'Will be written to:\n{deploy.exe_path(project)}')
+        where = QLabel(f'Will be written to: {deploy.exe_path(project)}')
         where.setWordWrap(True)
         layout.addWidget(where)
-        layout.addWidget(QLabel('Not in the package: .zygote, app_tree, zip and .git. Make ZIP is the snapshot of the whole project; this is the program.'))
+        self.requirements_box = None
+        offer = deploy.requirements_offer(project)
+        if offer:
+            layout.addWidget(self.heading('Dependencies'))
+            self.requirements_rel = offer[0]
+            self.requirements_box = QCheckBox(f'Install the packages listed in {offer[0]} when the program is first started')
+            self.requirements_box.setChecked(offer[1])
+            layout.addWidget(self.requirements_box)
+        self.item_boxes = {}
+        for title, items in deploy.sections(project):
+            layout.addWidget(self.heading(title))
+            for one in items:
+                box = QCheckBox(one['label'])
+                box.setChecked(one['ticked'])
+                box.setEnabled(not one['required'])
+                box.setToolTip(one['why'])
+                self.item_boxes[one['key']] = box
+                layout.addWidget(box)
+                if one['why']:
+                    layout.addWidget(self.note(one['why']))
+        needs = deploy.runtime_needs(project)
+        if needs:
+            layout.addWidget(self.heading('Not copied, checked on the computer'))
+            for name, what, kind, why in needs:
+                layout.addWidget(self.note(f'{name}: {what} ({kind}). {why}'))
+        layout.addStretch(1)
+        outer.addWidget(self.note('Not in the package: .zygote, app_tree, zip and .git. Make ZIP is the snapshot of the whole project; this is the program.', 0))
         buttons = QDialogButtonBox(QDialogButtonBox.Cancel)
         buttons.addButton('Deploy', QDialogButtonBox.AcceptRole)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        outer.addWidget(buttons)
+
+    @staticmethod
+    def heading(text):
+        label = QLabel(f'<b>{html.escape(text)}</b>')
+        label.setObjectName('sectionhead')
+        return label
+
+    @staticmethod
+    def note(text, indent=26):
+        label = QLabel(text)
+        label.setWordWrap(True)
+        label.setObjectName('why')
+        label.setStyleSheet(f'margin-left: {indent}px;')       # no colour here: the theme gives the words their contrast
+        return label
 
     def accept(self):
-        self.requirements = self.requirements_edit.text().strip()
+        self.requirements = self.requirements_rel if self.requirements_box is not None and self.requirements_box.isChecked() else ''
         self.window = self.window_box.isChecked()
-        self.args = self.args_edit.text().strip()
         self.ticked = [name for name, box in self.item_boxes.items() if box.isChecked()]
         super().accept()
 
@@ -1231,7 +1256,8 @@ class RebuildDialog(QDialog):
                 row.addWidget(QLabel(f'<b>{html.escape(item.label)}</b>'))
             note = QLabel(f'{html.escape(item.text)}' if item.tickable else html.escape(item.text))
             note.setWordWrap(True)
-            note.setStyleSheet('color: gray; margin-left: 22px;')
+            note.setObjectName('why')
+            note.setStyleSheet('margin-left: 22px;')
             row.addWidget(note)
             layout.addLayout(row)
         buttons = QDialogButtonBox()

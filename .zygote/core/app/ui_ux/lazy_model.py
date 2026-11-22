@@ -35,6 +35,7 @@ class Node:
 class LazyModel(Tint, QAbstractItemModel):
     directoryLoaded = Signal(str)
     binDropped = Signal(list)                                  # paths dropped on the recycle bin row
+    moveDropped = Signal(list, str)                            # (paths, folder): green items dropped on a folder; the window moves them
     renameWanted = Signal(str, str)                            # (path, new name): the person typed a new name in the view; the window does the rename
     HEADERS = ('Name', 'Size', 'Type', 'Date Modified')
 
@@ -372,6 +373,9 @@ class LazyModel(Tint, QAbstractItemModel):
         if kind == 'bin':
             return Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsDropEnabled
         flags = Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsDragEnabled
+        node = self.node(index)
+        if node.is_dir and self.project_root is not None and core.can_move_into(self.project_root, node.path):
+            flags |= Qt.ItemIsDropEnabled                      # a folder that green items may be dropped on
         if index.column() == 0 and self.project_root is not None and core.can_copy(self.project_root, self.node(index).path):
             flags |= Qt.ItemIsEditable                         # only what the person works on can be renamed (F2 or Rename in the menu); never the blue and system items
         return flags
@@ -507,14 +511,26 @@ class LazyModel(Tint, QAbstractItemModel):
             return []
         return bytes(data.data(PATHS_FORMAT)).decode('utf-8').split('\n')
 
+    def is_folder_target(self, index):
+        return index.isValid() and self.node(index).kind == 'item' and self.node(index).is_dir
+
     def canDropMimeData(self, data, action, row, column, parent):
-        from functional import core
         paths = self.dragged_paths(data)
-        return bool(paths) and parent.isValid() and self.node(parent).kind == 'bin' and self.project_root is not None and \
-            all(core.can_trash(self.project_root, path) for path in paths)
+        if not paths or not parent.isValid() or self.project_root is None:
+            return False
+        if self.node(parent).kind == 'bin':
+            return all(core.can_trash(self.project_root, path) for path in paths)
+        if not self.is_folder_target(parent):
+            return False
+        folder = Path(self.node(parent).path)
+        return core.can_move_into(self.project_root, folder) and all(
+            core.can_move(self.project_root, path) and Path(path) != folder and Path(path) not in folder.parents for path in paths)
 
     def dropMimeData(self, data, action, row, column, parent):
         if not self.canDropMimeData(data, action, row, column, parent):
             return False
-        self.binDropped.emit(self.dragged_paths(data))
+        if self.node(parent).kind == 'bin':
+            self.binDropped.emit(self.dragged_paths(data))
+        else:
+            self.moveDropped.emit(self.dragged_paths(data), self.node(parent).path)
         return True

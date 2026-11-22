@@ -360,7 +360,53 @@ def check_drop(project, plan):
         return {'verdict': 'unknown', 'text': f'This project has no version yet, and {new} does not carry its name. Unpack it over the project anyway?'}
     return {'verdict': 'refuse', 'text': f'{heading}\n\nThe ZIP is {new}; the project is {old or Path(project).name} (it goes by: {", ".join(sorted(set(mine)))}). '
             'It is another project\'s build, and unpacking it would mix the two projects. Nothing was unpacked.\n\n'
-            'If the project really was renamed, rename it first in Settings > Project settings…, then drop the ZIP again.'}
+            'You can open it as a new project of its own with the button below, or, if this project really was renamed, rename it first in Settings > Project settings…, then drop the ZIP again.',
+            'new_project': True}
+
+
+def new_project_name(plan):
+    """The folder name for a build ZIP opened as a new project: the project's name from its version (PARSER_PYTHON_0.1.5 gives PARSER_PYTHON). Raises for Zygote's own build."""
+    if is_zygote_build(plan):
+        raise ZygoteError("This is Zygote itself, not a project: start the new Zygote, then use File > Update project's Zygote…")
+    name = version_name(plan['version'])
+    check_item_name(name)
+    return name
+
+
+def unpack_new_project(zip_path, parent):
+    """Open a build ZIP as a NEW project: a folder named after the project is made inside `parent` and the ZIP is unpacked there (the same files an update would write; the
+    .git and sacred folders of the ZIP are left out, as in an update). A folder of that name that is already there is never deleted: it is moved beside it to
+    NAME_old_<date>_<time>. Returns (new folder, moved old folder or None). When the unpacking fails the old folder is put back and the error says so."""
+    parent = Path(parent)
+    if not parent.is_dir():
+        raise ZygoteError(f'The folder {parent} is not there.')
+    plan = inspect_zip(zip_path)
+    name = new_project_name(plan)
+    dest = parent / name
+    old = None
+    if dest.exists():
+        stamp = datetime.datetime.now().strftime('%Y-%m-%d_%H%M%S')
+        old = parent / f'{name}_old_{stamp}'
+        if old.exists():
+            raise ZygoteError(f'{old.name} is there already. Try again in a moment.')
+        try:
+            shutil.move(str(dest), str(old))
+        except OSError as error:
+            raise ZygoteError(f'The old {name} folder could not be moved aside ({error}). Close whatever uses it (a window, a program), then try again. Nothing was unpacked.') from error
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            for member, rel in plan['write']:
+                target = dest.joinpath(*rel.split('/'))
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with zf.open(member) as src, open(target, 'wb') as dst:
+                    dst.write(src.read())
+    except OSError as error:
+        shutil.rmtree(dest, ignore_errors=True)
+        if old is not None:
+            shutil.move(str(old), str(dest))
+        raise ZygoteError(f'Windows refused to write {error.filename or "a file"} ({error.strerror or error}). The new folder was removed'
+                          + (' and the old one is back where it was.' if old is not None else '.')) from error
+    return dest, old
 
 
 def protected_folders(skipped):
@@ -2323,6 +2369,53 @@ def rename_item(project, path, new_name):
         raise ZygoteError(f'Not renamed: {new_name} is there already in {path.parent.name}.')
     os.rename(path, target)
     return target
+
+
+def can_move_into(project, folder):
+    """True for a folder that green items may be moved into: any folder where the person may make things, and also the app_tree folder itself (it cannot be thrown away,
+    but its contents are the person's)."""
+    folder = Path(folder)
+    if folder.is_dir() and project_relative(project, folder) == TREE:
+        return True
+    return can_create_in(project, folder)
+
+
+def can_move(project, path):
+    """True for what the person may move: the green items (working files and folders). Never the project, app_tree itself, .zygote, .git, zip, the blue items or a launcher;
+    and not the files of the zip folder (they stay there)."""
+    return is_working(project, path) and not is_yellow(project, path) and can_copy(project, path)
+
+
+def move_into(project, sources, folder):
+    """Move green files and folders into a folder where they may go. Everything is checked first: when one item is refused, nothing at all is moved and the error names it.
+    Nothing is replaced (a name that is taken in the folder refuses the move). Returns the new paths."""
+    folder = Path(folder)
+    if not can_move_into(project, folder):
+        raise ZygoteError(f'Nothing can be moved into {folder.name}: it belongs to Zygote.')
+    plan = []
+    for source in map(Path, sources):
+        if not source.exists():
+            raise ZygoteError(f'{source.name} is not there any more.')
+        if not can_move(project, source):
+            raise ZygoteError(f'{source.name} cannot be moved: only the green files and folders you work on can (not the project, app_tree itself, .zygote, .git, zip or the launcher).')
+        if source.is_dir() and (folder == source or source in folder.parents):
+            raise ZygoteError(f'A folder cannot be moved into itself: {source.name}.')
+        target = folder / source.name
+        if source.parent == folder:
+            continue                                              # already there: nothing to do
+        if target.exists():
+            raise ZygoteError(f'Not moved: {source.name} is there already in {folder.name}.')
+        if any(target == other for _, other in plan):
+            raise ZygoteError(f'Not moved: two items are both called {source.name}.')
+        plan.append((source, target))
+    made = []
+    for source, target in plan:
+        try:
+            shutil.move(str(source), str(target))
+        except OSError as error:
+            raise ZygoteError(f'Not moved: {source.name} ({error}). Moved before it: {len(made)}.')
+        made.append(target)
+    return made
 
 
 def copy_into(project, sources, folder):

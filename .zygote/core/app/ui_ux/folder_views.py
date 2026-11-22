@@ -7,7 +7,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QModelIndex, QRect, Qt, Signal
 from PySide6.QtGui import QImage, QPixmap
-from PySide6.QtWidgets import QApplication, QLabel, QListView, QMenu, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTreeView
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QListView, QMenu, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTreeView
 
 from ui_ux.lazy_model import PATHS_FORMAT
 from ui_ux.recycle import SLOTS_FORMAT
@@ -16,8 +16,10 @@ from ui_ux.recycle import SLOTS_FORMAT
 class BinDrops:
     """What the two views share (one code path): drops on the recycle bin row, drops of bin items on the folder in view."""
     def bin_target(self, event):
+        """The row under the pointer when it can take a drop: the recycle bin row or a folder (a folder takes the green items moved into it)."""
         index = self.indexAt(event.position().toPoint())
-        return index if self.model().is_bin(index) else QModelIndex()
+        model = self.model()
+        return index if model.is_bin(index) or model.is_folder_target(index) else QModelIndex()
 
     def dragEnterEvent(self, event):
         self.refused_told = False
@@ -39,7 +41,10 @@ class BinDrops:
                 if target.isValid() and not getattr(self, 'refused_told', False):
                     self.refused_told = True
                     names = ', '.join(Path(path).name for path in self.model().dragged_paths(data))
-                    self.refused.emit(f'Refused by the recycle bin: {names} (only the green items you work on can be thrown away).')
+                    if self.model().is_bin(target):
+                        self.refused.emit(f'Refused by the recycle bin: {names} (only the green items you work on can be thrown away).')
+                    else:
+                        self.refused.emit(f'Not moved into {target.data()}: {names} (only the green items you work on can be moved, and not into themselves or into Zygote folders).')
         else:
             self.window().dragEnterEvent(event)
 
@@ -56,6 +61,26 @@ class BinDrops:
                 event.ignore()
         else:
             self.window().dropEvent(event)
+
+
+class UpButton(QPushButton):
+    """The up-one-folder button. Green items of Zygote's own folder view dropped on it are moved out, into the folder above the one in view."""
+    movedOut = Signal(list)
+
+    def __init__(self):
+        super().__init__()
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasFormat(PATHS_FORMAT) and self.isEnabled():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        paths = bytes(event.mimeData().data(PATHS_FORMAT)).decode('utf-8').split('\n')
+        self.movedOut.emit(paths)
+        event.acceptProposedAction()
 
 
 class FullNameDelegate(QStyledItemDelegate):

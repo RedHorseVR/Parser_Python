@@ -1,6 +1,6 @@
 {
   "started_with": "Z_2.17.2",
-  "last_upgraded_to": "Z_2.19.13",
+  "last_upgraded_to": "Z_2.19.16",
   "events": [
     {
       "when": "2026-11-21T13:46:08-06:00",
@@ -21,6 +21,11 @@
       "when": "2026-11-22T02:51:36-06:00",
       "zygote": "Z_2.19.13",
       "what": "Installed PARSER_PYTHON_0.1.5.zip: PARSER_PYTHON_0.1.5 -> PARSER_PYTHON_0.1.5"
+    },
+    {
+      "when": "2026-11-22T03:33:52-06:00",
+      "zygote": "Z_2.19.16",
+      "what": "Opened with Zygote Z_2.19.16 (before: Z_2.19.13; forward)"
     }
   ]
 }

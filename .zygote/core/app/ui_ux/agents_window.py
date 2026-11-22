@@ -2,6 +2,7 @@
 are still the catalog. The starter reads a folder's file list and proposes where each file goes in Zygote's layout; the person ticks the moves
 to make, presses Go, and can press Undo. Layout: one drag bar lets the lists (agents, explanation) take height from the working area; the meters and
 the model strip keep their own height."""
+import functools
 import os
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
@@ -9,12 +10,13 @@ from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (QComboBox, QFileDialog, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QListWidget, QMessageBox, QPlainTextEdit, QPushButton,
                                QSizePolicy, QSplitter, QTableWidget, QTableWidgetItem, QTextBrowser, QToolButton, QVBoxLayout, QWidget)
 
-from ai import settings, starter
+from ai import prompts, settings, starter
 from ai.agents import AGENTS
 from ai.http import Http
 from ai.ollama import Ollama
 from functional import core
 from ui_ux.machine_meters import MachineMeters
+from ui_ux.realign_dialog import RealignDialog
 
 STARTER = 'Project starter agent'
 
@@ -85,6 +87,7 @@ class AgentsWindow(QWidget):
         self.main = main
         self.http = Http(self)
         self.run = None                                     # the StarterRun in progress
+        self.realign_dialog = None                          # the open Realign panel
         self.folder = None                                  # the folder the starter reads (the project's own until changed)
         self.plan = None                                    # the proposal on the table
         self.checks = {}                                    # old path -> ticked (kept while the table is refilled)
@@ -155,8 +158,10 @@ class AgentsWindow(QWidget):
         self.run_button.setToolTip('Load the model, then ask it where each file belongs. Nothing is moved by this: it only makes a proposal.')
         self.stop_button = QPushButton('Stop')
         self.stop_button.setEnabled(False)
+        self.realign_button = QPushButton('Realign')
+        self.realign_button.setToolTip('Change what this agent is told to do: opens a panel that shows its prompt, takes your words and checks them with the model. Nothing else can be used meanwhile.')
         controls.addWidget(self.folder_label, 1)
-        for widget in (self.browse_button, self.run_button, self.stop_button):
+        for widget in (self.browse_button, self.run_button, self.stop_button, self.realign_button):
             controls.addWidget(widget)
         box.addLayout(controls)
         goal_row = QHBoxLayout()
@@ -213,6 +218,7 @@ class AgentsWindow(QWidget):
         self.agent_list.itemDoubleClicked.connect(lambda item: self.main.guarded(self.run_starter) if item.text() == STARTER else None)
         self.run_button.clicked.connect(lambda: self.main.guarded(self.run_starter))
         self.stop_button.clicked.connect(self.stop_starter)
+        self.realign_button.clicked.connect(lambda: self.main.guarded(self.realign))
         self.browse_button.clicked.connect(lambda: self.main.guarded(self.choose_folder))
         self.mic_button.clicked.connect(self.start_dictation)
         self.refresh_button.clicked.connect(lambda: self.main.guarded(self.ask_models))
@@ -319,6 +325,47 @@ class AgentsWindow(QWidget):
             user32.keybd_event(key, 0, 2 if up else 0, 0)
         return True
 
+    def realign(self):
+        """The Realign panel (modal) for the Project starter agent: its prompt, the person's new words, the model's check, and Save as the prompt of this agent in this project."""
+        project = self.main.need_project()
+        dialog = RealignDialog(self, STARTER, prompts.read(project, STARTER), prompts.is_changed(project, STARTER), self.realign_ask, self.dictate_into_box,
+                               functools.partial(self.realign_save, project), functools.partial(self.realign_reset, project), microphone_icon())
+        self.realign_dialog = dialog
+        self.show_modal(dialog)
+        self.realign_dialog = None
+
+    def show_modal(self, dialog):
+        """Show the panel and wait until it is closed. Tests replace this."""
+        dialog.exec()
+
+    def realign_ask(self, prompt, words, done):
+        model = self.model_box.currentText().strip()
+        if not model:
+            done(False, 'Choose or type the model first (in the Model section of the agents window).')
+            return
+        self.ollama().generate(model, prompts.realign_question(prompt, words), lambda ok, data: done(ok, self.realign_text(ok, data)), options={'temperature': 0})
+
+    @staticmethod
+    def realign_text(ok, data):
+        if not ok:
+            return f'The model did not answer: {data}'
+        text = data.get('response', '') if isinstance(data, dict) else ''
+        return text if text.strip() else 'The model gave no answer text.'
+
+    def realign_save(self, project, prompt, words):
+        text = prompts.with_change(prompt, words)
+        prompts.write(project, STARTER, text)
+        return text, True
+
+    def realign_reset(self, project):
+        prompts.reset(project, STARTER)
+        return prompts.default_text(STARTER), False
+
+    def dictate_into_box(self):
+        """The dictation key press for the Realign panel (the panel put the cursor in its box already)."""
+        if not self.press_dictation_keys():
+            self.say('Voice typing: press your system\'s dictation key with the cursor in the box (Windows: Win+H).')
+
     def ask_folder(self):
         """Pick the folder to read. Tests replace this."""
         return QFileDialog.getExistingDirectory(self, 'Folder to place', str(self.folder or ''))
@@ -348,7 +395,7 @@ class AgentsWindow(QWidget):
         self.problems.clear()
         self.say(f'{len(files)} files found' + (f' (the list was cut at {starter.SCAN_LIMIT})' if cut else '') + f'. Loading {model} into the GPU first…')
         ollama = self.ollama()
-        self.run = starter.StarterRun(ollama, model, files, self.progressed, self.finished, self.goal.text())
+        self.run = starter.StarterRun(ollama, model, files, self.progressed, self.finished, self.goal.text(), prompts.read(self.main.need_project(), STARTER))
         self.set_running(True)
         ollama.load(model, self.loaded)                     # an HTTP call (Ollama must already be running; Zygote never starts it)
 

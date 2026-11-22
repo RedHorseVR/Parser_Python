@@ -6,6 +6,8 @@ name, entry, args, requirements, window) and deploy_run.py (the hand-written sta
 A project that cannot be deployed this way (no Python entry point) is refused with the reason: no fallback."""
 import json
 import os
+import shutil
+import stat
 import tempfile
 import zipfile
 from pathlib import Path
@@ -26,7 +28,8 @@ def settings(project):
 
 
 DEPENDENCIES = 'app_tree/dependencies.json'   # written by hand by the project: what a deployed program cannot run without
-ALWAYS_LEFT_OUT = ('.zygote/user', '.zygote/credentials', '.zygote/logs', '.zygote/env', '.git', 'zip')   # the machine's own: never carried, whatever a list says
+ALWAYS_LEFT_OUT = ('.zygote/user', '.zygote/credentials', '.zygote/logs', '.zygote/env', '.git', 'zip',
+                   'app_tree/tests', 'app_tree/notes', 'START_HERE.md')   # the machine's own and the build side's (tests, notes, the hand-over file): never carried and never offered, whatever a list says
 KINDS, TYPES = ('required', 'optional'), ('folder', 'file', 'runtime')
 
 
@@ -53,16 +56,112 @@ def _clean(rel):
     return str(rel).replace('\\', '/').strip('/')
 
 
+def section_of(key, need):
+    """The group a dialog item belongs to, by where it sits: optional ones are their own group; of the required ones the version files, the assets folder,
+    the Zygote core pieces (.zygote/core) and the rest (the program itself)."""
+    if not need:
+        return 'Optional (your choice)'
+    if key.rsplit('/', 1)[-1] == 'VERSION.txt':
+        return 'Versions'
+    if key == 'app_tree/assets' or key.startswith('app_tree/assets/'):
+        return 'Assets'
+    if key.startswith('.zygote/core/'):
+        return 'Zygote core components'
+    return 'Program (required)'
+
+
+SECTION_ORDER = ('Optional (your choice)', 'Program (required)', 'Assets', 'Versions', 'Zygote core components')
+
+
 def choices(project):
-    """The list the dialog shows: [{'key', 'label', 'why', 'required', 'ticked'}], the optional ones first and the required ones last. Required entries are
-    locked on, optional ones start unticked; the project says why each is there. Entries of type runtime are not here (see runtime_needs)."""
+    """The list the dialog shows: [{'key', 'label', 'why', 'required', 'ticked', 'section'}], the optional ones first and the required ones last. Required entries
+    are locked on, optional ones start unticked; the project says why each is there. Entries of type runtime are not here (see runtime_needs). What Deploy never
+    carries (ALWAYS_LEFT_OUT: tests, notes, START_HERE.md ...) is not offered; a project that lists such a path as required is told so."""
     saved, out = settings(project), []
+    never = _never(project)
     for one in dependencies(project)['dependencies']:
         if one['type'] == 'runtime':
             continue
         key, need = _clean(one['path']), one['kind'] == 'required'
-        out.append({'key': key, 'label': f"{one['name']}  ({key})", 'why': one.get('why', ''), 'required': need, 'ticked': need or key in saved['include']})
+        if _left_out(key, never):
+            if need:
+                raise ZygoteError(f'{DEPENDENCIES} lists {key} as required, but Deploy never carries it (tests, notes and the hand-over file are not part of a program).')
+            continue
+        out.append({'key': key, 'label': f"{one['name']}  ({key})", 'why': one.get('why', ''), 'required': need, 'ticked': need or key in saved['include'],
+                    'section': section_of(key, need)})
     return sorted(out, key=lambda one: one['required'])        # stable: optional first, required last
+
+
+def sections(project):
+    """The dialog's groups in the order shown: [(title, [choice, ...])]; an empty group is left out."""
+    items = choices(project)
+    return [(title, [one for one in items if one['section'] == title]) for title in SECTION_ORDER if any(one['section'] == title for one in items)]
+
+
+REQUIREMENTS_PLACES = ('requirements.txt', 'app/requirements.txt', 'app_tree/requirements.txt')
+
+
+def requirements_offer(project):
+    """The requirements file the dialog offers, as (relative path, ticked), or None when the project has none (then the dialog shows nothing about packages).
+    The one saved earlier counts when it is still there; else requirements.txt at the top, in app or in app_tree. It starts ticked."""
+    root = core.clean_path(project)
+    saved = settings(project)['requirements']
+    for rel in ([saved] if saved else []) + list(REQUIREMENTS_PLACES):
+        if (root / rel).is_file():
+            return rel, True
+    return None
+
+
+def _never(project):
+    return tuple(_clean(one) for one in dependencies(project).get('never_copied', []) if '/' in _clean(one))
+
+
+def old_output(project):
+    """What an earlier Deploy left in the deploy folder: the exe and the home folder it made when it was run there (both, whichever are there)."""
+    exe = exe_path(project)
+    return [path for path in (exe, exe.parent / home_name(project)) if path.exists()]
+
+
+def _unlock(function, path, _error):
+    """rmtree's hand for a read-only file (Windows): make it writable and try again; a second failure is raised."""
+    os.chmod(path, stat.S_IWRITE)
+    function(path)
+
+
+def _remove(path):
+    try:
+        if path.is_dir():
+            shutil.rmtree(path, onerror=_unlock)
+        else:
+            os.chmod(path, stat.S_IWRITE)
+            path.unlink()
+    except OSError as error:
+        raise ZygoteError(f'{path} could not be removed ({error.strerror or error}). Close the program that runs from it (and any window showing it), then try again. Nothing was built.') from error
+
+
+def remove_old(project):
+    """Wipe the earlier Deploy output completely: the exe AND its home folder, with everything in it (a home left behind would start stale files instead of the new build).
+    Returns the names removed."""
+    gone = old_output(project)
+    for path in gone:
+        _remove(path)
+    return [path.name for path in gone]
+
+
+def backup_old(project):
+    """Move the earlier Deploy output (exe and home folder) into zip\\deploy_old\\<date-time>\\ and return that folder. The deploy folder is then empty of it."""
+    found = old_output(project)
+    if not found:
+        raise ZygoteError('There is no earlier deploy output to back up.')
+    stamp = core.now().strftime('%Y-%m-%d_%H%M%S')
+    target = core.zip_folder(project) / 'deploy_old' / stamp
+    target.mkdir(parents=True, exist_ok=True)
+    for path in found:
+        try:
+            shutil.move(str(path), str(target / path.name))
+        except OSError as error:
+            raise ZygoteError(f'{path} could not be moved to the backup ({error.strerror or error}). Close the program that runs from it, then try again. Nothing was built.') from error
+    return target
 
 
 def runtime_needs(project):
@@ -140,7 +239,7 @@ def files(project):
     one, at the same path as in the project (so the program's own paths still work). An entry that is not there is refused with its name."""
     root = core.clean_path(project)
     found = dependencies(project)
-    never = tuple(_clean(one) for one in found.get('never_copied', []) if '/' in _clean(one))
+    never = _never(project)
     ticked = {one['key'] for one in choices(project) if one['ticked']}
     wanted = [(_clean(one['path']), one['name']) for one in found['dependencies'] if one['type'] != 'runtime' and _clean(one['path']) in ticked]
     seen, out = set(), []
