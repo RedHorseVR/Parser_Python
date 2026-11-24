@@ -36,7 +36,7 @@ from ui_ux.marks_scout import MarksScout
 from ui_ux.debug_control import DebugControl
 from ui_ux.code_window import DropToCode
 from ui_ux.instance import InstanceGuard, bring_to_front, flash
-from ui_ux.dialogs import AboutDialog, ConfirmProjectDialog, DeployDialog, GitSettingsDialog, HeldFilesDialog, HistoryWindow, IconsDialog, LicenseDialog, NewProjectDialog, MakeZipDialog, OpenProjectDialog, PreferencesDialog, ProjectSettingsDialog, RebuildDialog, RevertDialog, TestsDialog, ToolsDialog, CleanupDialog
+from ui_ux.dialogs import AboutDialog, ConfirmProjectDialog, DeployDialog, GitSettingsDialog, HeldFilesDialog, HistoryWindow, IconsDialog, LayoutDialog, LicenseDialog, NewProjectDialog, MakeZipDialog, OpenProjectDialog, PreferencesDialog, ProjectSettingsDialog, RebuildDialog, RevertDialog, TestsDialog, ToolsDialog, CleanupDialog
 from ui_ux.lazy_model import LazyModel
 from ui_ux.models import FolderTint, ProjectModel, ProjectOnlyProxy
 from ui_ux.toast import Toast
@@ -965,6 +965,33 @@ class MainWindow(QMainWindow):
             self.refresh()
         return added
 
+    def ask_layout(self, items):
+        """The panel of standard folders and files this project lacks (with their pictures; the default ones ticked). The keys ticked, or None for Cancel. Tests replace this."""
+        dialog = LayoutDialog(items, self)
+        return dialog.chosen if dialog.exec() == QDialog.Accepted else None
+
+    def offer_layout(self):
+        """Part of the core update: when the project lacks standard items (app, app_tree, deploy, START_HERE.md, extras, Libs) the person is offered them in one panel. Nothing is asked
+        when nothing is missing. Returns the number of items added."""
+        items = core.layout_missing(self.project)
+        if not items:
+            return 0
+        self.close_toast()
+        chosen = self.ask_layout(items)
+        if not chosen:
+            self.say('Standard layout: nothing was added; the project stays as it is.')
+            return 0
+        done = core.add_layout(self.project, chosen)
+        for line in done:
+            self.say(f'Standard layout: {line}')
+        self.note('Standard layout: ' + ', '.join(done))
+        self.refresh()
+        return len(done)
+
+    @staticmethod
+    def with_layout(text, count):
+        return text + (f', {count} standard item{"s" if count != 1 else ""} added' if count else '')
+
     @staticmethod
     def with_icons(text, added):
         return text + (f', {added} new icon{"s" if added != 1 else ""} added' if added else '')
@@ -1010,9 +1037,10 @@ class MainWindow(QMainWindow):
             added = self.refresh_core_icons()
             if added:
                 core.remember_update(self.project, self.with_icons('', added).lstrip(', '))
+            laid = self.offer_layout()
             last = core.last_update_text(self.project)
-            if added:
-                self.show_toast(self.with_icons('Update complete', added))
+            if added or laid:
+                self.show_toast(self.with_layout(self.with_icons('Update complete', added), laid))
             else:
                 self.show_toast('Shortcuts updated' if fixed else f'Already updated. {last}' if last else 'Already updated')
             return False
@@ -1032,12 +1060,13 @@ class MainWindow(QMainWindow):
         added = self.refresh_core_icons()
         core.remember_update(self.project, f'Zygote {new} copied' + (f', {added} new icon{"s" if added != 1 else ""} added' if added else ''))
         self.refresh_structure()
+        laid = self.offer_layout()
         self.refresh()
         if core.restart_pending():                                 # the Yes also covered this (the question said so): one restart
             self.say(f'Restarting Zygote to run {new} ({"in a visible console that stays open" if after else "minimized, closing itself"}).')
             self.restart(updated=True)
         else:
-            self.show_toast(self.with_icons('Update complete', added))
+            self.show_toast(self.with_layout(self.with_icons('Update complete', added), laid))
         return True
 
     def ask_cleanup(self, items):

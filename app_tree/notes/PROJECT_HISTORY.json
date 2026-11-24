@@ -1,6 +1,6 @@
 {
   "started_with": "Z_2.17.2",
-  "last_upgraded_to": "Z_2.19.35",
+  "last_upgraded_to": "Z_2.19.37",
   "events": [
     {
       "when": "2026-11-21T13:46:08-06:00",
@@ -61,6 +61,11 @@
       "when": "2026-11-24T00:22:39-06:00",
       "zygote": "Z_2.19.35",
       "what": "Opened with Zygote Z_2.19.35 (before: Z_2.19.31; forward)"
+    },
+    {
+      "when": "2026-11-24T01:24:07-06:00",
+      "zygote": "Z_2.19.37",
+      "what": "Opened with Zygote Z_2.19.37 (before: Z_2.19.35; forward)"
     }
   ]
 }

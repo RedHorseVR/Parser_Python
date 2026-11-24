@@ -2182,6 +2182,75 @@ def adopt_project(project, name):
     return {'outer': outer, 'added': added, 'gitignore_written': ignore_written, 'version': version, 'version_written': version_written, 'start_here': 'kept' if kept else 'written'}
 
 
+# ---- The standard layout: what Update project's core offers when a project lacks it (data in assets/standard_layout.json) ----------------
+LAYOUT_FILE = zpath(ZYGOTE_ROOT, 'assets', 'standard_layout.json')
+LAYOUT_NOTES = zpath(ZYGOTE_ROOT, 'assets', 'layout')
+
+
+def standard_layout():
+    """The items of assets/standard_layout.json. Raises with the plain reason when the file is not usable."""
+    try:
+        items = json.loads(LAYOUT_FILE.read_text(encoding='utf-8'))['items']
+        for one in items:
+            one['key'], one['kind'], one['default']
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise ZygoteError(f'{LAYOUT_FILE} is missing or damaged ({error}). Unpack the build ZIP again.') from error
+    return items
+
+
+def tree_files_missing(project):
+    """The baseline files that belong in the app tree and are not in this project yet."""
+    return [rel for rel in missing_baseline(project) if rel.replace('\\', '/').split('/')[0] in TREE_FOLDERS]
+
+
+def layout_missing(project):
+    """The standard items this project lacks, as the layout file's entries plus 'picture' (the file) and 'count' (files, for the tree). [] for Zygote's own folder and for a
+    project that still keeps the older layout (that one is moved first). A folder or file counts as there in any letter case."""
+    project = clean_path(project)
+    if project == ZYGOTE_ROOT or is_legacy_layout(project):
+        return []
+    names = {path.name.lower() for path in project.iterdir()}
+    out = []
+    for one in standard_layout():
+        count = 0
+        if one['kind'] == 'tree':
+            count = len(tree_files_missing(project))
+            if not count:
+                continue
+        elif one['key'].lower() in names:
+            continue
+        out.append(dict(one, count=count, picture=layout_picture(one['key'])))
+    return out
+
+
+def add_layout(project, keys):
+    """Add the standard items named in `keys` (only what is missing; nothing that exists is changed). Returns one sentence per item added."""
+    project = clean_path(project)
+    wanted = set(keys)
+    done = []
+    for one in layout_missing(project):
+        if one['key'] not in wanted:
+            continue
+        if one['kind'] == 'tree':
+            files = tree_files_missing(project)
+            for rel in files:
+                target = zpath(project, rel)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes((BASELINE / rel).read_bytes())
+            done.append(f'{TREE}: {len(files)} file{"s" if len(files) != 1 else ""} added')
+        elif one['kind'] == 'file':
+            (project / one['key']).write_text(start_here_text(project, project_name(project), read_version(project) or ''), encoding='utf-8')
+            done.append(f'{one["key"]} added')
+        else:
+            folder = project / one['key']
+            folder.mkdir()
+            note = LAYOUT_NOTES / f'{one["key"]}.README.md'
+            if note.is_file():
+                (folder / 'README.md').write_bytes(note.read_bytes())
+            done.append(f'{one["key"]}\\ added')
+    return done
+
+
 # ---- Contents: read and edit a text file inside Zygote (no process); every Save keeps what was there in zip\edits ----------------
 MAX_TEXT_BYTES = 2_000_000
 EDIT_NAME = re.compile(r'^edit_(\d{4,})\.zip$')
@@ -2929,9 +2998,14 @@ def is_app_tree(project, path):
 
 def folder_picture(project, path):
     """The picture file that stands for a folder of the project's top level by its name (app_tree: the tree, app: source, Libs: bricks, extras: blocks, deploy: the rocket; START_HERE.md: the brain and book; any letter case), else None."""
-    names = {TREE: APP_TREE_ICON, 'app': SOURCE_ICON, 'libs': BRICKS_ICON, 'extras': EXTRAS_ICON, 'deploy': DEPLOY_ICON, 'start_here.md': START_HERE_ICON}
     rel = project_relative(project, path)
-    return None if rel is None else names.get(rel.lower())
+    return None if rel is None else layout_picture(rel)
+
+
+def layout_picture(name):
+    """The picture that stands for a top-level name (any letter case), else None. The one table: the Workbench and the standard-layout panel use it."""
+    names = {TREE: APP_TREE_ICON, 'app': SOURCE_ICON, 'libs': BRICKS_ICON, 'extras': EXTRAS_ICON, 'deploy': DEPLOY_ICON, 'start_here.md': START_HERE_ICON}
+    return names.get(str(name).lower())
 
 
 def is_yellow(project, path):

@@ -4,7 +4,7 @@ import datetime
 import html
 from pathlib import Path
 
-from PySide6.QtCore import Signal, QProcess, QProcessEnvironment, Qt
+from PySide6.QtCore import Signal, QProcess, QProcessEnvironment, QSize, Qt
 from PySide6.QtGui import QAction, QBrush, QColor, QPixmapCache, QGuiApplication, QIcon, QImage, QKeySequence, QPixmap, QTextCursor
 from PySide6.QtWidgets import (QWidget, QAbstractItemView, QCheckBox, QComboBox, QScrollArea, QGroupBox, QMessageBox, QPlainTextEdit, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGridLayout, QHBoxLayout,
                                QColorDialog, QInputDialog, QLabel, QLineEdit, QPushButton, QRadioButton, QTableWidget, QTableWidgetItem, QListWidget, QListWidgetItem, QTreeWidget, QTreeWidgetItem, QVBoxLayout)
@@ -1662,18 +1662,22 @@ class TickListDialog(QDialog):
     """A list of files with a tick each (all unticked), Continue and Cancel. One class for every "which of these may be replaced" question (locked files in a ZIP,
     icons that differ from Zygote's set). Result: .chosen (the keys of the ticked lines) after accept(); Cancel changes nothing."""
 
-    def __init__(self, title, intro, lines, parent=None):
+    def __init__(self, title, intro, lines, parent=None, ticked=(), pictures=None):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setMinimumSize(640, 340)
         self.chosen = None
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(intro))
+        label = QLabel(intro)
+        label.setWordWrap(True)
+        layout.addWidget(label)
         self.list = QListWidget()
         for key, text in lines:
             entry = QListWidgetItem(text)
+            if pictures and pictures.get(key):                      # a line may carry its picture (the standard-layout panel)
+                entry.setIcon(QIcon(str(pictures[key])))
             entry.setFlags(entry.flags() | Qt.ItemIsUserCheckable)
-            entry.setCheckState(Qt.Unchecked)
+            entry.setCheckState(Qt.Checked if key in ticked else Qt.Unchecked)
             entry.setData(Qt.UserRole, key)
             self.list.addItem(entry)
         layout.addWidget(self.list, 1)
@@ -1705,6 +1709,17 @@ class IconsDialog(TickListDialog):
         super().__init__("Zygote — icons that differ from Zygote's set",
                          "These icons are in this project and are not the same as the ones in Zygote's set.\nTick the ones Zygote may replace. The others are kept as they are.",
                          [(name, name) for name in names], parent)
+
+
+class LayoutDialog(TickListDialog):
+    """The standard items this project lacks, each with its own picture and name; the ones marked default are ticked. Result: .chosen (keys). Cancel adds nothing."""
+
+    def __init__(self, items, parent=None):
+        lines = [(one['key'], f"{one['label']}   \u2014   {one['why']}" + (f"  ({one['count']} files)" if one.get('count') else '')) for one in items]
+        super().__init__('Zygote \u2014 the standard layout',
+                         'These standard folders and files are not in this project. Tick the ones Zygote may add. Nothing that is there is moved or changed; untick all to keep the project as it is.',
+                         lines, parent, ticked=[one['key'] for one in items if one['default']], pictures={one['key']: one['picture'] for one in items})
+        self.list.setIconSize(QSize(36, 36))
 
 
 class HistoryTree(QTreeWidget):

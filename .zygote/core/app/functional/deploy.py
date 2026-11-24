@@ -373,6 +373,14 @@ def build(project, dest=None, target=None):
     return dest, count
 
 
+ICON_NAME = 'program.ico'                                     # the program's icon inside program\\ (setup puts it on the shortcuts)
+
+
+def command_name(project):
+    """The word typed in a console to start the deployed program: the project's name in lower case, safe for a file name (VFlow -> vflow)."""
+    return core.BAD_NAME_CHARACTERS.sub('_', core.project_name(project)).strip(' .').replace(' ', '_').lower() or 'program'
+
+
 PROGRAM_DIR = 'program'                                       # inside the deploy folder: the project's files, deploy.json, deploy_run.py and the environment
 
 
@@ -396,12 +404,15 @@ def remove_folder(project):
 def build_folder(project, dest=None):
     """Make the package as one folder, no exe: at its top only the three setup files (setup.bat, setup.sh, setup.command) and `program`; in `program` the project's files at
     their own paths, deploy.json, deploy_run.py, deploy_setup.py, the three start files and README_RUNTIME.md. The environment is built on the computer that runs it, when setup is run. Returns (the folder, the number of project files). The folder must not be there: the caller clears an earlier one after asking."""
-    wanted = dict(plan(project), gate=True)                        # data for deploy_run.py: this package builds its environment only when setup is run
+    command = command_name(project)
+    icon = core.program_icon(project)
+    icon = icon if icon and Path(icon).suffix.lower() == '.ico' else None
+    wanted = dict(plan(project), gate=True, command=command, icon=ICON_NAME if icon else '')       # data for deploy_run.py and setup: the environment is built only when setup is run
     sources = [RUN_SCRIPT, SETUP_SCRIPT, PACKAGE_README] + [START_DIR / name for name in START_FILES + SETUP_FILES]
     for source in sources:
         if not source.is_file():
             raise ZygoteError(f'The start file is missing: {source}. Unpack the build ZIP again.')
-    carried_names = START_FILES + SETUP_FILES + ('deploy.json', 'deploy_run.py', 'deploy_setup.py', 'README_RUNTIME.md')
+    carried_names = START_FILES + SETUP_FILES + ('deploy.json', 'deploy_run.py', 'deploy_setup.py', 'README_RUNTIME.md', f'{command}.bat', command, ICON_NAME)
     taken = [name for _, name in files(project) if name in carried_names]
     if taken:
         raise ZygoteError(f'The project already has {taken[0]} at its top: Deploy writes a file of that name. Rename yours first.')
@@ -423,6 +434,11 @@ def build_folder(project, dest=None):
     for name in START_FILES:                                       # the start files live inside program\\ (hidden from the top)
         shutil.copyfile(START_DIR / name, program / name)
         (program / name).chmod(0o755)
+    shutil.copyfile(START_DIR / 'start.bat', program / f'{command}.bat')      # what typing the program's name runs (a copy of the hand-written start file, never generated)
+    shutil.copyfile(START_DIR / 'start.sh', program / command)
+    (program / command).chmod(0o755)
+    if icon:
+        shutil.copyfile(icon, program / ICON_NAME)                                 # the icon of the shortcuts setup writes
     for name in SETUP_FILES:                                       # the three setup files stay at the top: the person sees nothing else but program\\
         shutil.copyfile(START_DIR / name, folder / name)
         (folder / name).chmod(0o755)
