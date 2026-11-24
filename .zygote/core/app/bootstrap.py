@@ -17,7 +17,8 @@ import venv
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-ENV = ROOT / '.zygote' / 'env'
+DEPLOYED = (ROOT / 'deploy.json').is_file()                 # a folder Deploy made: its start script built the environment in .venv (the folder's own data says what it is)
+ENV = ROOT / '.venv' if DEPLOYED else ROOT / '.zygote' / 'env'
 REQUIREMENTS = ROOT / '.zygote' / 'config' / 'requirements.txt'
 RECORD = ENV / 'INSTALLED.json'
 
@@ -41,16 +42,21 @@ def env_python():
     return ENV / ('Scripts' if os.name == 'nt' else 'bin') / ('python.exe' if os.name == 'nt' else 'python')
 
 
+def fix_hint():
+    """What to do about a missing or old environment: a deployed folder builds it from its start file; the development folder from RUN.bat."""
+    return 'Start it with start.bat (or the shortcut) in this folder: that builds the environment.' if DEPLOYED else 'Run app_tree\\bat\\RUN.bat once.'
+
+
 def stale_reason():
     """None when the environment matches requirements.txt; otherwise the plain sentence that says what to do.
     main.py asks this at start-up, because a shortcut starts the app without the bootstrap."""
     if not RECORD.is_file():
-        return f'The environment was never built ({RECORD} is missing). Run app_tree\\bat\\RUN.bat once.'
+        return f'The environment was never built ({RECORD} is missing). {fix_hint()}'
     moved = env_moved_reason()
     if moved:
-        return f'{moved} Run app_tree\\bat\\RUN.bat once so it builds the environment for this computer.'
+        return f'{moved} {fix_hint()}'
     if recorded_hash() != requirements_hash():
-        return 'config\\requirements.txt changed since the environment was built. Run app_tree\\bat\\RUN.bat once so it installs the change.'
+        return f'config\\requirements.txt changed since the environment was built. {fix_hint()}'
     return None
 
 

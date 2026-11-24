@@ -66,6 +66,16 @@ class InstanceGuard(QObject):
         return instance_name.name_for(key)
 
     @staticmethod
+    def is_running(key):
+        """True when a window holds this project. Nothing is sent: the window is not asked to do anything."""
+        socket = QLocalSocket()
+        socket.connectToServer(InstanceGuard.name_for(key))
+        found = socket.waitForConnected(CONNECT_MS)
+        if found:
+            socket.disconnectFromServer()
+        return found
+
+    @staticmethod
     def ask_running(key):
         """True when a window already holds this project: it was told to come forward. False: nobody does."""
         socket = QLocalSocket()

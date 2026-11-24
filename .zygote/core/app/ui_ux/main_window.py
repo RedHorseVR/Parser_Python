@@ -17,12 +17,12 @@ from pathlib import Path
 from PySide6.QtCore import QCoreApplication, QDir, QEvent, QModelIndex, QPoint, QPointF, QRect, QSize, QThread, QTimer, Qt, Signal
 from PySide6.QtGui import QAction, QColor, QFont, QGuiApplication, QIcon, QKeySequence, QPainter, QPixmap, QPixmapCache, QPolygonF, QShortcut
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QLabel, QListView, QMainWindow, QMenu,
-                               QHBoxLayout, QMessageBox, QPlainTextEdit, QPushButton, QSizePolicy, QSplitter, QStackedWidget, QTabBar, QToolBar,
+                               QHBoxLayout, QInputDialog, QMessageBox, QPlainTextEdit, QPushButton, QSizePolicy, QSplitter, QStackedWidget, QTabBar, QToolBar,
                                QTreeView, QVBoxLayout, QWidget)
 
 import crashlog
 from functional import core
-from functional import cleanup, restructure
+from functional import cleanup, restructure, git_tools
 from functional.rebuild import Rebuild
 import terminal
 from ui_ux.commit_runner import CommitRunner
@@ -36,14 +36,14 @@ from ui_ux.marks_scout import MarksScout
 from ui_ux.debug_control import DebugControl
 from ui_ux.code_window import DropToCode
 from ui_ux.instance import InstanceGuard, bring_to_front, flash
-from ui_ux.dialogs import AboutDialog, ConfirmProjectDialog, DeployDialog, MakeZipDialog, OpenProjectDialog, PreferencesDialog, ProjectSettingsDialog, RebuildDialog, RevertDialog, TestsDialog, ToolsDialog, CleanupDialog
+from ui_ux.dialogs import AboutDialog, ConfirmProjectDialog, DeployDialog, GitSettingsDialog, HeldFilesDialog, HistoryWindow, IconsDialog, LicenseDialog, NewProjectDialog, MakeZipDialog, OpenProjectDialog, PreferencesDialog, ProjectSettingsDialog, RebuildDialog, RevertDialog, TestsDialog, ToolsDialog, CleanupDialog
 from ui_ux.lazy_model import LazyModel
 from ui_ux.models import FolderTint, ProjectModel, ProjectOnlyProxy
 from ui_ux.toast import Toast
 from ui_ux.panels import PictureButton, TitledPanel
 from ui_ux.shell_tabs import BottomTabs, ShellPage, ShellWindow, TabGhost, close_button
 from ui_ux.theme import Theme
-from ui_ux.folder_views import FolderDetails, FolderIcons, PathBar, UpButton
+from ui_ux.folder_views import FolderDetails, FolderIcons, HeldDelegate, PathBar, UpButton
 from ui_ux.recycle import TrashWindow, bin_icon
 from ui_ux.zoom import IconZoomFilter, TreeZoomFilter
 
@@ -96,6 +96,10 @@ class MainWindow(QMainWindow):
         self.path_label = QLabel('')
         self.path_label.setTextFormat(Qt.RichText)
         self.path_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        big = self.path_label.font()
+        big.setPointSizeF(big.pointSizeF() * 2 if big.pointSizeF() > 0 else 18)            # the project location, twice the size
+        self.path_label.setFont(big)
+        self.path_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)         # a long path is cut at the window's edge, never makes the window wider
 
         self.computer_tree = self.make_tree()
         self.computer_tree.clicked.connect(self.show_computer_folder)
@@ -303,6 +307,7 @@ class MainWindow(QMainWindow):
         tree.setHeaderHidden(True)
         tree.setDragEnabled(False)                              # dragging out of a tree would open a project by accident
         tree.setDragDropMode(QAbstractItemView.NoDragDrop)
+        tree.setItemDelegate(HeldDelegate(tree))
         return tree
 
     def build_models(self):
@@ -377,16 +382,28 @@ class MainWindow(QMainWindow):
         quit_action.triggered.connect(self.close)
         menu.addAction(quit_action)
         project = self.menuBar().addMenu('&Project')
+        self.new_project_action = self.add_action(project, '&New…', self.new_project)              # Z 2.19.19: first in the menu, above Settings
         self.open_action = self.add_action(project, '&Open project…', self.choose_project, QKeySequence.Open)
         self.undo_action = self.add_action(project, '&Revert project…', self.revert_project, QKeySequence.Undo)
-        for unused in (self.open_action, self.undo_action):      # no longer in the menu (Luis, Z 2.15.1): dropping a folder opens a project; Revert was dangerous and unused.
+        project.removeAction(self.undo_action)
+        for unused in (self.open_action,):      # no longer in the menu (Luis, Z 2.15.1): dropping a folder opens a project; Revert was dangerous and unused.
             project.removeAction(unused)                          # The actions and their code stay; with no menu they have no shortcut either.
-        self.tests_action = self.add_action(project, 'Run &test suite…', self.show_tests)
+        self.settings_action = self.add_action(project, '&Settings…', self.project_settings)       # project settings and the look, in one place
+        self.license_action = self.add_action(project, '&License settings…', self.license_settings)  # developer, organization, year and license of the project
         project.addSeparator()
         self.update_core_action = self.add_action(project, "&Update project's core", self.update_core)       # in its own group: it acts on the open project
         self.rebuild_action = self.add_action(project, 'Re&make launchers…', self.rebuild_project)         # part of the update group, for now
+        project.removeAction(self.rebuild_action)                  # Z 2.19.18: no longer in the menu; Update project's core and opening a project remake the shortcuts
+        self.revert_action = self.add_action(project, '&Revert project…', self.revert_project)       # every saved drop (checkpoint) in one window
         project.addSeparator()
+        self.tests_action = self.add_action(project, 'Run &test suite…', self.show_tests)
         self.history_action = self.add_action(project, 'Project h&istory', self.show_history)
+        git_menu = self.menuBar().addMenu('&Git')                  # Z 2.19.19: between Project and Debug
+        self.commit_action = self.add_action(git_menu, '&Commit', self.commit)
+        self.branch_action = self.add_action(git_menu, 'New &branch…', self.new_branch)
+        self.git_undo_action = self.add_action(git_menu, 'Undo &last Git step…', self.undo_git_step)
+        git_menu.addSeparator()
+        self.git_settings_action = self.add_action(git_menu, 'Git &settings…', self.git_settings)
         self.debug_menu = self.menuBar().addMenu('&Debug')           # always there (grayed out when it does not apply); "Debug mode" below is the one switch
         control = self.debugger
         self.debug_mode_action = self.add_action(self.debug_menu, 'Debug &mode', self.choose_debug_mode, checkable=True)    # the same state as Project settings > Run uses
@@ -402,11 +419,12 @@ class MainWindow(QMainWindow):
         self.always_actions = [                                      # with any project, debug mode or not
             self.add_action(self.debug_menu, 'Show &code window', control.show_code),
             self.add_action(self.debug_menu, '&Language bundle…', control.language_bundle)]
-        settings = self.menuBar().addMenu('&Settings')
-        self.settings_action = self.add_action(settings, 'Project &settings…', self.project_settings)
-        self.preferences_action = self.add_action(settings, 'Project &preferences…', self.preferences)
-        self.tools_action = self.add_action(settings, '&Tools…', self.tools_settings)
-        ai_menu = self.menuBar().addMenu('&AI')                       # between Settings and Help
+        self.tools_menu = self.menuBar().addMenu('&Tools')          # Z 2.19.19 (was the Settings menu): Settings…, a line, then the command line tools
+        self.tools_action = self.add_action(self.tools_menu, '&Settings…', self.tools_settings)
+        self.tools_separator = self.tools_menu.addSeparator()
+        self.tool_actions = []
+        self.rebuild_tools_menu()
+        ai_menu = self.menuBar().addMenu('&AI')                       # between Tools and Help
         self.ai_action = self.add_action(ai_menu, 'AI &settings…', self.show_ai)          # global settings: everything below uses them
         ai_menu.addSeparator()
         self.layout_ai_action = self.add_action(ai_menu, 'AI panel (&layout)…', self.show_layout_ai)
@@ -434,7 +452,7 @@ class MainWindow(QMainWindow):
         return dialog.values() if dialog.exec() == QDialog.Accepted else None
 
     def preferences(self):
-        """Settings > Project preferences…: theme and outer colour of THIS project; saved in the project, applied whenever it is opened."""
+        """Project > Settings… > Theme and outer colour…: theme and outer colour of THIS project; saved in the project, applied whenever it is opened."""
         project = self.need_project()
         answer = self.ask_preferences()
         if answer is None:
@@ -452,7 +470,7 @@ class MainWindow(QMainWindow):
             self.apply_look(light, outer)
         except ValueError as error:
             self.apply_look(light, None)
-            raise core.ZygoteError(f'The outer colour saved in this project is wrong ({error}). Open Settings > Project preferences… and choose it again.') from error
+            raise core.ZygoteError(f'The outer colour saved in this project is wrong ({error}). Open Project > Settings… > Theme and outer colour… and choose it again.') from error
 
     def reload_views(self):
         """File > Reload: read the folders, the icons and the version again (something outside Zygote may have changed them)."""
@@ -489,7 +507,7 @@ class MainWindow(QMainWindow):
             self.restart()
 
     def show_about(self):
-        AboutDialog(self).exec()
+        AboutDialog(self, core.license_notice(self.project) if self.project is not None else '').exec()
 
     def add_button(self, bar, text, tip, action, icon=None, box=None):
         """A real button on the toolbar whose press runs `action` through guarded(); an optional check box sits under it."""
@@ -601,9 +619,9 @@ class MainWindow(QMainWindow):
         gap_column.addWidget(self.debug_gap)
         gap_column.addStretch(1)
         self.toolbar_cells[self.debug_gap] = bar.addWidget(gap_cell)
-        self.commit_button = self.add_button(bar, 'Commit', 'Open TortoiseGit\'s commit window for the open project (app_tree\\bat\\COMMIT.bat)', self.commit)
+        self.commit_button = self.add_button(bar, 'Commit', 'Commit the open project with the program chosen in Settings > Git settings… (TortoiseGit: app_tree\\bat\\COMMIT.bat)', self.commit)
         self.zip_button = self.add_button(bar, 'Make ZIP', 'Make a ZIP of the open project in its zip folder (asks what to include)', self.make_zip)
-        self.deploy_button = self.add_button(bar, 'Deploy', 'Make one program (an exe) of the open project that runs on another computer: unpacks a <project>_home folder and starts it', self.deploy)
+        self.deploy_button = self.add_button(bar, 'Deploy', 'Make a package of the open project that runs on another computer: a folder with start files (Windows, Linux, Mac), or one exe', self.deploy)
         self.name_label = label(22, bold=True, bright=True)      # the project name: bigger, in the middle of the bar
         self.name_label.setAlignment(Qt.AlignCenter)
         self.version_label = label(20, bold=True)                # the version: twice the old size (easy to read on a large screen), centered under the name
@@ -633,11 +651,15 @@ class MainWindow(QMainWindow):
     # ---- state -----------------------------------------------------------------------------------------------
     ERROR_WORDS = re.compile(r'\b(error|errors|failed|failure|could not|cannot|can not|refused|not found)\b', re.IGNORECASE)
 
+    WARNING_WORDS = re.compile(r'\b(warning|warnings|not changed|kept|skipped|cancelled|canceled|stale)\b', re.IGNORECASE)
+
     def say(self, text):
-        """One line in the Log. A line that tells of an error is red (the one colour for it in the theme), the rest keeps the ordinary text colour."""
+        """One line in the Log. A line that tells of an error is red, one that warns is yellow (one colour each in the theme), the rest keeps the ordinary text colour."""
         line = f'{datetime.datetime.now():%H:%M:%S}  {text}'
         if self.ERROR_WORDS.search(text):
             self.log.appendHtml(f'<span style="color:{Theme.colors()["error"]};">{html.escape(line)}</span>')
+        elif self.WARNING_WORDS.search(text):
+            self.log.appendHtml(f'<span style="color:{Theme.colors()["warning"]};">{html.escape(line)}</span>')
         else:
             self.log.appendPlainText(line)
 
@@ -702,6 +724,7 @@ class MainWindow(QMainWindow):
         self.version_label.setText(f'VERSION: {version or "?"}')
         self.since_label.setText(f'last change {datetime.datetime.fromisoformat(since):%Y-%m-%d %H:%M}' if since else 'last change ?')
         self.path_label.setText(f'<b>PROJECT LOCATION:</b> {html.escape(str(self.project))}')
+        self.path_label.setToolTip(str(self.project))                                      # the whole path, when it is cut
         debug = core.run_mode(self.project) == 'debug'
         self.run_button.setText('Run debug' if debug else 'Run')       # the Debug / Runtime buttons of Project settings
         self.show_debug_tools(debug)
@@ -722,6 +745,7 @@ class MainWindow(QMainWindow):
         self.ready_sent = False
         self.say('Loading the working space…')
         self.computer_model.project_root = self.tree_model.project_root = self.icon_model.project_root = folder
+        self.tree_model.held = self.icon_model.held = tuple(core.held_list(folder))      # the locks of this computer (the first drawing already shows them)
         self.icon_model.bin_pictures = (bin_icon(False), bin_icon(True))
         self.refresh_bin()
         self.icon_model.with_bin = True                          # the recycle bin is the first item of every folder of the project
@@ -730,6 +754,9 @@ class MainWindow(QMainWindow):
         self.show_in_views(self.icon_model.index(str(folder)))
         self.show_title(folder)
         self.apply_project_look()                                 # the look belongs to the project
+        missing = core.run_settings_missing(folder)
+        if missing:
+            self.say(missing)                                     # a project rebuilt from a copy that lost its run settings says so, instead of letting the program print its own help
         self.apply_zoom()                                         # so does the size of the text and icons in each panel
         self.show_zygote_menu()
         self.show_program_icon()                                  # so does the program icon
@@ -910,14 +937,62 @@ class MainWindow(QMainWindow):
         """One short question. True for yes. Tests replace this. `new` is the Zygote on the disk; a Yes that brings in another version than the
         one running also restarts Zygote on this project (said in the second line)."""
         text = f'Update {project.name} from {old or "no copy"} to {new}?'
+        last = core.last_update_text(project)
+        if last:
+            text += f'\nThe last update here: {last}'
         if new != core.RUNNING_VERSION:
             text += '\nZygote restarts to run it.'
         return QMessageBox.question(self, "Zygote \u2014 update the project's core", text, QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes
 
+    def ask_icons(self, names):
+        """The panel of the project's icons that differ from Zygote's set. The names ticked (replaced), or None for Cancel. Tests replace this."""
+        dialog = IconsDialog(names, self)
+        return dialog.chosen if dialog.exec() == QDialog.Accepted else None
+
+    def refresh_core_icons(self):
+        """The icon set is part of the core: missing icons are added without a question; icons that differ (by contents) are asked about in one panel, all unticked.
+        Returns the number of icons added (said in the log and in the history; the toast adds it when it is more than none)."""
+        missing, differing = core.icon_changes(self.project)
+        chosen = (self.ask_icons(differing) or []) if differing else []
+        added, replaced = core.refresh_icons(self.project, chosen)
+        if added:
+            self.say(f'{self.project.name}: {added} new icon{"s" if added != 1 else ""} added to the icons folder.')
+            self.note(f'Core update: {added} new icon{"s" if added != 1 else ""} added')
+        if replaced:
+            self.say(f'{self.project.name}: {replaced} icon{"s" if replaced != 1 else ""} replaced by the ones in the core set.')
+            self.note(f'Core update: {replaced} icon{"s" if replaced != 1 else ""} replaced')
+        if added or replaced:
+            self.refresh()
+        return added
+
+    @staticmethod
+    def with_icons(text, added):
+        return text + (f', {added} new icon{"s" if added != 1 else ""} added' if added else '')
+
+    def ask_running_program(self):
+        """A program still runs in the Console as the core is to be updated. True = stop it for the person. False = the person stops it themself first. Tests replace this."""
+        box = QMessageBox(QMessageBox.Question, 'Zygote', 'A program is still running in the Console.\nStop it for you, or stop it yourself first (to save your work)?', parent=self)
+        stop = box.addButton('Stop it for me', QMessageBox.AcceptRole)
+        box.addButton("I'll stop it myself", QMessageBox.RejectRole)
+        box.exec()
+        return box.clickedButton() is stop
+
+    def settle_running_program(self):
+        """Before anything is copied: a program running in the Console must end. Nothing is stopped unless the person presses Stop it for me. True = free to go on."""
+        if self.console is None or not self.console.is_running():
+            return True
+        self.close_toast()
+        if self.ask_running_program():
+            self.stop_console()
+        if self.console.is_running():
+            self.say('Update not started: a program is still running in the Console. Stop it, then update again.')
+            return False
+        return True
+
     def update_core(self):
-        """Project > Update project's core: when the project's copy, the disk and the running Zygote are all the same version a toast says so and nothing
-        is asked. Otherwise one question; Yes copies into .zygote\\core and, when the disk has another version than the one running, starts the new Zygote
-        with --updated (it says "Update complete")."""
+        """Project > Update project's core: an "Updating" toast at once, then a program running in the Console is dealt with before anything is copied. When the project's
+        copy, the disk and the running Zygote are all the same version nothing is asked and the toast repeats the last real update. Otherwise one question; Yes copies
+        into .zygote\\core and, when the disk has another version than the one running, starts the new Zygote with --updated (it says "Update complete")."""
         self.need_project()
         old, new = core.core_version(self.project), core.installed_version()
         if self.project == core.ZYGOTE_ROOT:                      # the core itself: nothing to copy, but the launcher and the tidying are still its update
@@ -926,12 +1001,26 @@ class MainWindow(QMainWindow):
             self.refresh()
             self.show_toast('Update complete')
             return True
-        if core.core_is_current(self.project):
-            self.show_toast('Already updated')
+        self.show_toast('Updating \u2026', hold=True)
+        if not self.settle_running_program():
+            self.close_toast()
             return False
+        if core.core_is_current(self.project):
+            fixed = core.LAUNCHER_IS_SHORTCUT and self.stamp_shortcut(toast=False)           # the shortcut check rides along: only what was wrong is said
+            added = self.refresh_core_icons()
+            if added:
+                core.remember_update(self.project, self.with_icons('', added).lstrip(', '))
+            last = core.last_update_text(self.project)
+            if added:
+                self.show_toast(self.with_icons('Update complete', added))
+            else:
+                self.show_toast('Shortcuts updated' if fixed else f'Already updated. {last}' if last else 'Already updated')
+            return False
+        self.close_toast()                                          # the question is asked over a clear window
         if not self.ask_update_core(self.project, old, new):
             self.say('Cancelled: the project\'s Zygote was not changed')
             return False
+        self.show_toast('Updating \u2026', hold=True)
         external = core.external_console(self.project)
         count = core.update_core(self.project)
         after = core.external_console(self.project)
@@ -940,13 +1029,15 @@ class MainWindow(QMainWindow):
         renamed = core.rename_launcher(self.project)             # the launcher carries the project's name (VFlow_Zide.lnk); only a rename
         if renamed:
             self.say(renamed)
+        added = self.refresh_core_icons()
+        core.remember_update(self.project, f'Zygote {new} copied' + (f', {added} new icon{"s" if added != 1 else ""} added' if added else ''))
         self.refresh_structure()
         self.refresh()
         if core.restart_pending():                                 # the Yes also covered this (the question said so): one restart
             self.say(f'Restarting Zygote to run {new} ({"in a visible console that stays open" if after else "minimized, closing itself"}).')
             self.restart(updated=True)
         else:
-            self.show_toast('Update complete')
+            self.show_toast(self.with_icons('Update complete', added))
         return True
 
     def ask_cleanup(self, items):
@@ -1022,7 +1113,7 @@ class MainWindow(QMainWindow):
         self.note(f'Added the .zygote folder ({len(report["added"])} files); version {report["version"]}')
         if report['outer']:
             self.apply_project_look()                            # the new project's own colour
-            self.say(f'{project.name} got its own colour {report["outer"]} (Settings > Project preferences… changes it).')
+            self.say(f'{project.name} got its own colour {report["outer"]} (Project > Settings… > Theme and outer colour… changes it).')
         self.refresh()
         self.say(f'Added {len(report["added"])} files to {project.name}\\.zygote; version {report["version"]}'
                  + ('' if report['version_written'] else ' (kept)') + f'; START_HERE.md {report["start_here"]}')
@@ -1083,6 +1174,7 @@ class MainWindow(QMainWindow):
         panel = ProjectSettingsDialog(project, core.project_name(project), core.run_all(project), core.external_console(project), core.run_mode(project), self,
                                        icon=core.load_state(project).get('icon', ''))
         panel.mode_changed.connect(lambda mode: self.guarded(functools.partial(self.set_debug_mode, mode == 'debug')))
+        panel.look_requested.connect(lambda: self.guarded(self.preferences))
         panel.saved.connect(lambda: self.guarded(self.settings_saved))
         panel.accepted.connect(lambda: self.guarded(self.settings_accepted))
         self.settings_dialog = panel
@@ -1202,10 +1294,10 @@ class MainWindow(QMainWindow):
             self.say('Console: this runner (pythonw) has no output, so there is nothing to capture.')
         self.run_in_console(command, label)
 
-    def note(self, what):
-        """One line in the project's history (app_tree\\notes). A problem is shown and logged; the work goes on."""
+    def note(self, what, drop=None):
+        """One line in the project's history (app_tree\\notes); `drop` = what a dropped ZIP did, kept with it for the history window. A problem is shown and logged; the work goes on."""
         try:
-            core.record_event(self.project, what)
+            core.record_event(self.project, what, drop)
         except core.ZygoteError as error:
             self.say(f'History not written: {error}')
             self.show_error(f'History not written:\n{error}')
@@ -1222,7 +1314,9 @@ class MainWindow(QMainWindow):
 
     def show_history(self):
         project = self.need_project()
-        self.help_window = HelpWindow.text_page(f'{core.project_name(project)} — project history', core.history_text(project), self)
+        if not core.load_history(project):
+            raise core.ZygoteError('This project has no history yet. It starts when the project is opened with a .zygote folder in it.')
+        self.help_window = HistoryWindow(f'{core.project_name(project)} — project history', core.load_history(project), project, self)
         self.help_window.show()
 
     def show_tests(self):
@@ -1258,15 +1352,24 @@ class MainWindow(QMainWindow):
             self.say_rebuild(line)
         self.reload_views()                                       # the Workbench draws the new launcher icon at once
 
-    def stamp_shortcut(self):
-        """Put this project's launcher at its root (<project>_Zide.lnk) and its Zygote shortcut in .zygote\\user. A failure is shown; the project stays open."""
+    def stamp_shortcut(self, toast=True):
+        """Put this project's launcher at its root (<project>_Zide.lnk) and its Zygote shortcut in .zygote\\user. A failure is shown; the project stays open.
+        True when a shortcut was missing or held another place (the project was moved, renamed or came from a ZIP): it is made again and a toast says
+        "Shortcuts updated" (a healthy shortcut says nothing)."""
         try:
+            wrong = core.shortcuts_wrong(self.project)
             self.say(f'Launcher ready: {core.make_launcher(self.project)}')
             for link in core.create_shortcut(self.project, core.project_name(self.project)):
                 self.say(f'Shortcut stamped: {link}')
         except core.ZygoteError as error:
             self.say(f'Launcher or shortcut not made: {error}')
             self.show_error(f'The project is open, but the launcher or shortcut was not made:\n{error}')
+            return False
+        if wrong:
+            self.say(f'Shortcuts updated (were missing or held another place): {", ".join(wrong)}')
+            if toast:
+                self.show_toast('Shortcuts updated')
+        return bool(wrong)
 
     # ---- actions ---------------------------------------------------------------------------------------------
     def browse(self, path):
@@ -1491,6 +1594,7 @@ class MainWindow(QMainWindow):
             self.add_action(menu, core.file_manager_label(), functools.partial(core.open_path, path))
             self.paste_action(menu, path)
             self.edit_actions(menu, path)
+            self.hold_action(menu, path)
             self.trash_action(menu, path)
             return menu
         self.add_action(menu, 'Open', functools.partial(core.open_file, path))
@@ -1500,8 +1604,31 @@ class MainWindow(QMainWindow):
         if core.is_text_file(path):
             self.add_action(menu, 'View contents', functools.partial(self.view_contents, path))
         self.edit_actions(menu, path)
+        self.hold_action(menu, path)
         self.trash_action(menu, path)
         return menu
+
+    def hold_action(self, menu, path):
+        """Lock / Unlock, only for what the person works on. A locked item is not replaced by a dropped ZIP (its copy in the ZIP is left out); a locked code file will not get a fix from a ZIP."""
+        if self.project is None or not core.can_hold(self.project, path):
+            return
+        rel = core.project_relative(self.project, path)
+        held = core.held_list(self.project)
+        if rel in held:
+            self.add_action(menu, 'Unlock', functools.partial(self.change_hold, path, False))
+        elif core.held_covering(held, rel):
+            above = core.held_covering(held, rel)
+            self.add_action(menu, f'Locked by the folder {above}', None).setEnabled(False)
+        else:
+            self.add_action(menu, 'Lock (a dropped ZIP will not replace it)', functools.partial(self.change_hold, path, True))
+
+    def change_hold(self, path, locked):
+        project = self.need_project()
+        rel = core.hold(project, path) if locked else core.release(project, path)
+        held = tuple(core.held_list(project))
+        for model in (self.tree_model, self.icon_model):
+            model.set_held(held)
+        self.say(f'{"Locked" if locked else "Unlocked"}: {rel}' + ('  (a dropped ZIP will not replace it, a fix to it included; Unlock is in the right-click menu)' if locked else ''))
 
     def edit_actions(self, menu, path):
         """Copy and Rename: only for what the person works on."""
@@ -1716,16 +1843,149 @@ class MainWindow(QMainWindow):
     def tools_settings(self):
         dialog = ToolsDialog(core.associations(), self)
         if dialog.exec() == QDialog.Accepted:
-            self.say(f'Tools saved: {len(dialog.values())} file types')
+            self.rebuild_tools_menu()
+            self.say(f'Tools saved: {len(dialog.values())} file types, {len(dialog.command_values())} command line tools')
+
+    def rebuild_tools_menu(self):
+        """Tools menu: the saved command line tools below the line, one entry each (made again after the panel saves)."""
+        for action in self.tool_actions:
+            self.tools_menu.removeAction(action)
+            action.deleteLater()
+        self.tool_actions = []
+        for tool in core.command_tools():
+            action = QAction(tool['name'].replace('&', '&&'), self)
+            action.setToolTip(tool['command'])
+            action.triggered.connect(lambda _checked=False, one=tool: self.guarded(functools.partial(self.run_command_tool, one)))
+            self.tools_menu.addAction(action)
+            self.tool_actions.append(action)
+
+    def show_warning(self, text):
+        """A warning with one OK button; tests replace this."""
+        QMessageBox.warning(self, 'Zygote \u2014 stopped', text)
+
+    def selected_file(self):
+        """The one selected file of the folder views ('' when nothing, or only a folder, is selected)."""
+        for view in (self.icons, self.details):
+            for path in self.selected_paths(view):
+                if Path(path).is_file():
+                    return path
+        return ''
+
+    def run_command_tool(self, tool):
+        """A press on one command line tool: fill in <file> and <folder>, refuse a delete/move/rename of a protected item, then start ONE process (in the Console tab,
+        or in an external console window). The folder it starts in is the project root."""
+        project = self.need_project()
+        line = core.command_tool_line(project, tool['command'], self.selected_file(), self.shown_folder() or str(project))
+        danger = core.command_danger(project, line)
+        if danger:
+            self.say(f'Tool {tool["name"]}: {danger}')
+            self.show_warning(danger)
+            return False
+        if not tool['console']:
+            shown = core.open_external_tool(line, project, tool['keep_open'])
+            if shown is not None:
+                self.say(f'Tool {tool["name"]} started in an external console: {line}')
+                return True
+            self.say('External console: this system has no terminal Zygote knows; running in the Console tab instead.')
+        return self.run_in_console(core.command_shell_words(line), tool['name'])
+
+    def ask_new_project(self):
+        """The Project > New dialog: (parent folder, name, license record) or None. Tests replace this."""
+        base = Path(self.project).parent if self.project is not None else Path.home()
+        dialog = NewProjectDialog(base, self)
+        return dialog.values() if dialog.exec() == QDialog.Accepted else None
+
+    def new_project(self):
+        """Project > New…: make the folder with the Zygote structure and the license, then open it: here when no project is open, else in a window of its own."""
+        answer = self.ask_new_project()
+        if answer is None:
+            self.say('Cancelled: no project made')
+            return None
+        parent, name, record = answer
+        folder = core.create_project(parent, name, record)
+        self.say(f'Made the project {name}: {folder}')
+        if self.project is None:
+            self.begin_project(folder)
+        else:
+            self.open_in_own_window(folder)
+        return folder
+
+    def license_settings(self):
+        """Project > License settings…: developer, organization, year and license of the open project."""
+        project = self.need_project()
+        dialog = LicenseDialog(project, self)
+        if dialog.exec() == QDialog.Accepted:
+            self.say(dialog.result_text)
+            self.show_toast(dialog.result_text)
+            self.note('License settings saved')
 
     RELOAD_WAIT_MS = 4000                                      # an external console tells nothing when it ends: Reload waits this long after the press
     FINISHED_WAIT_MS = 1500                                    # in the Console tab: Reload follows the end of the commit by this long (TortoiseGit writes its marks first)
+
+    def git_settings(self):
+        """Settings > Git settings…: TortoiseGit or the command line git (this computer's choice)."""
+        dialog = GitSettingsDialog(git_tools.program(), self)
+        if dialog.exec() == QDialog.Accepted:
+            git_tools.set_program(dialog.program())
+            self.say(f'Git program: {"TortoiseGit" if dialog.program() == "tortoise" else "command line git"}')
+
+    def ask_text(self, title, label):
+        """A line of text from the person ('' when cancelled). Tests replace this."""
+        text, ok = QInputDialog.getText(self, title, label)
+        return text.strip() if ok else ''
+
+    def ask_yes(self, title, text):
+        """A yes/no question; tests replace this."""
+        return QMessageBox.question(self, title, text) == QMessageBox.Yes
+
+    def new_branch(self):
+        """Project > New branch…: TortoiseGit opens its own Create Branch window; the command line asks for a name and switches to the new branch."""
+        project = self.need_project()
+        if not core.has_git(project):
+            raise core.ZygoteError('There is no .git folder in this project.')
+        if git_tools.program() == 'tortoise':
+            git_tools.start_tortoise(project, 'branch')
+            self.say('TortoiseGit: Create Branch opened.')
+            return
+        name = self.ask_text('New branch', 'Name of the new branch (made from where the project is now, and switched to):')
+        if not name:
+            return
+        git_tools.new_branch(project, name)
+        self.say(f'New branch "{name}" made and switched to.')
+        self.schedule_reload(self.FINISHED_WAIT_MS)
+
+    def undo_git_step(self):
+        """Project > Undo last Git step…: says in words what will happen, asks, then goes back one step (command line git; TortoiseGit opens its Reflog window)."""
+        project = self.need_project()
+        if not core.has_git(project):
+            raise core.ZygoteError('There is no .git folder in this project.')
+        if git_tools.program() == 'tortoise':
+            git_tools.start_tortoise(project, 'reflog')
+            self.say('TortoiseGit: Reflog opened (right-click the step to go back to).')
+            return
+        step = git_tools.last_step(project)
+        if not self.ask_yes('Undo last Git step', git_tools.undo_words(step) + '\n\nGo ahead?'):
+            return
+        git_tools.undo_step(project, step)
+        self.say(f'Undone: {step["what"]}')
+        self.schedule_reload(self.FINISHED_WAIT_MS)
+
+    def commit_command_line(self, project):
+        message = self.ask_text('Commit', 'Commit message (everything in the project folder is committed):')
+        if not message:
+            self.say('Commit cancelled.')
+            return
+        self.say(git_tools.commit_all(project, message))
+        self.schedule_reload(self.FINISHED_WAIT_MS)
 
     def commit(self):
         """Commit: COMMIT.bat runs TortoiseGit and waits for it, in a process of its own (never the Console tab: a program running under test is not stopped
         and not touched). Its output goes to the Log, its end is a signal, and the views are read again then (the red marks). With "Show external console
         output" ticked the batch file opens its own console, as before, and the reload waits a few seconds after the press."""
         project = self.need_project()
+        if git_tools.program() == 'commandline':
+            self.commit_command_line(project)
+            return
         if core.external_console(project):
             self.launch(core.zrel('bat', 'COMMIT.bat'))
             self.schedule_reload(self.RELOAD_WAIT_MS)
@@ -2239,48 +2499,129 @@ class MainWindow(QMainWindow):
                 self.say(f'Wrote zip\\{path.name}: {count} files' + (f' (with {" and ".join(included)})' if included else ''))
         core.show_in_explorer(written[0])                     # the press must show a result: the zip folder opens with the new file selected
 
-    def ask_replace_deploy(self, names):
-        """The deploy folder holds an earlier program (and the folder it made when it was run there). 'delete' wipes all of it, 'backup' moves it into the zip folder,
-        None = cancel. Tests replace this."""
-        box = QMessageBox(QMessageBox.Question, 'Zygote', f'The deploy folder already holds: {", ".join(names)}.\n\nThe new program replaces all of it, including the home folder '
-                          'and every file in it.', QMessageBox.NoButton, self)
-        delete = box.addButton('Delete it', QMessageBox.AcceptRole)
-        backup = box.addButton('Back it up first', QMessageBox.AcceptRole)
+    def ask_replace_deploy(self, exe_name, home_name, backup, already):
+        """The deploy folder holds an earlier program. The exe is COPIED into the backup folder first and then deleted; the home folder is deleted with everything in it
+        (it is not backed up). True = go on, False = cancel. Tests replace this."""
+        lines = [f'The deploy folder already holds {exe_name}.']
+        lines.append(f'It is already backed up in {backup}; it will just be deleted.' if already else f'It is copied to {backup} first, then deleted.')
+        if home_name:
+            lines.append(f'WARNING: the folder {home_name} (made when the program was run there) is DELETED with everything in it. It is not backed up. Copy out anything you want to keep first.')
+        return QMessageBox.question(self, 'Zygote — deploy', '\n\n'.join(lines)) == QMessageBox.Yes
+
+    def ask_exe_busy(self, name, reason):
+        """The earlier program could not be deleted (usually it is running). Its backup is made. True = it was shut down: try again; False = stop here. Tests replace this."""
+        box = QMessageBox(QMessageBox.Warning, 'Zygote — deploy', f'{name} could not be deleted: {reason}\n\nIt is backed up already. Shut the program down, then press Try again '
+                          '(or Cancel and press Deploy later: the backup will be noticed and the old program just deleted).', QMessageBox.NoButton, self)
+        again = box.addButton('Try again', QMessageBox.AcceptRole)
         box.addButton('Cancel', QMessageBox.RejectRole)
         box.exec()
-        return 'delete' if box.clickedButton() is delete else 'backup' if box.clickedButton() is backup else None
+        return box.clickedButton() is again
+
+    def clear_old_deploy(self, project):
+        """Backup (copy) of the exe, then delete the exe, then delete the home folder. False when the person cancelled or left the program running."""
+        from functional import deploy as deploying
+        exe, home = deploying.old_exe(project), deploying.old_home(project)
+        if exe is None and home is None:
+            return True
+        backup = deploying.backup_folder(project)
+        if not self.ask_replace_deploy(exe.name if exe else '', home.name if home else '', backup, exe is not None and deploying.is_backed_up(project)):
+            self.say('Cancelled: the earlier deploy is left alone')
+            return False
+        if exe is not None:
+            folder, already = deploying.backup_exe(project)
+            self.say(f'{exe.name} {"was already backed up in" if already else "copied to"} {folder}')
+            while deploying.old_exe(project) is not None:
+                try:
+                    deploying.remove_exe(project)
+                except core.ZygoteError as error:
+                    if not self.ask_exe_busy(exe.name, str(error)):
+                        self.say(f'{exe.name} is backed up in {folder} and still in the deploy folder. Shut it down and press Deploy again: the backup is noticed and it is just deleted.')
+                        return False
+        while deploying.old_home(project) is not None:
+            try:
+                deploying.remove_home(project)
+            except core.ZygoteError as error:
+                if not self.ask_exe_busy(home.name, str(error)):
+                    self.say(f'{home.name} could not be deleted; nothing was built.')
+                    return False
+        self.say('Earlier deploy cleared.')
+        return True
 
     def ask_deploy(self, project, plan):
         """Deploy was pressed: the requirements file and the window choice. (requirements, window, args, ticked), or None when cancelled. Tests replace this."""
         from functional import deploy as deploying
         dialog = DeployDialog(project, plan, deploying.settings(project), self)
-        return (dialog.requirements, dialog.window, dialog.args, dialog.ticked) if dialog.exec() == QDialog.Accepted else None
+        if dialog.exec() != QDialog.Accepted:
+            return None
+        deploying.save_target(project, dialog.target)             # folder or exe: kept beside the other Deploy choices
+        return (dialog.requirements, dialog.window, dialog.args, dialog.ticked)
 
     def deploy(self):
         """Deploy: one program of the project, in the deploy folder at the top, named like the project. Its own button next to Make ZIP (Make ZIP stays the snapshot)."""
         from functional import deploy as deploying
         project = self.need_project()
+        self.settle_entry(project)                             # an empty entry point: Zygote's own folder says app/main.py; another project picks from a list
         plan = deploying.plan(project)                         # refuses loudly (no entry point, not Python) before anything is asked
         choice = self.ask_deploy(project, plan)
         if choice is None:
             self.say('Cancelled: nothing deployed')
             return
         deploying.save_settings(project, *choice)
-        old = deploying.old_output(project)
-        if old:                                                # the exe AND its home folder go together: a home left behind would start stale files
-            answer = self.ask_replace_deploy([path.name for path in old])
-            if answer is None:
-                self.say(f'Cancelled: {", ".join(path.name for path in old)} left alone')
-                return
-            if answer == 'backup':
-                self.say(f'Earlier deploy moved to {deploying.backup_old(project)}')
-            else:
-                self.say(f'Earlier deploy removed: {", ".join(deploying.remove_old(project))}')
+        if deploying.settings(project)['target'] == 'folder':
+            return self.deploy_folder(project, plan)
+        if not self.clear_old_deploy(project):
+            return
         self.say('Making the program (one compiler run, a few seconds)…')
         path, count = deploying.build(project)
         self.refresh()
         self.say(f'Wrote deploy\\{path.name}: {count} project files inside ({path.stat().st_size // 1024} KB). On another computer it unpacks {deploying.home_name(project)} beside itself and starts {plan["entry"]}.')
         core.show_in_explorer(path)
+
+    def ask_entry(self, candidates):
+        """A list of the files that may start the program; the one picked (OK) or None (Cancel). With one candidate it is shown selected: the person presses OK. Tests replace this."""
+        picked, ok = QInputDialog.getItem(self, 'Zygote \u2014 deploy', 'No entry point is set. Which file starts the program?', candidates, 0, False)
+        return picked if ok else None
+
+    def settle_entry(self, project):
+        """Deploy needs an entry point. Zygote's own folder: app/main.py for this deploy, said in a toast and the Log, nothing saved. Another project with none saved: the
+        candidates are listed and the pick is saved as its entry point; none found: said plainly (Deploy then refuses); Cancel: Deploy stops."""
+        if core.run_settings(project, 'runtime')['entry']:
+            return
+        own = core.own_entry(project)
+        if own:
+            self.say(f'Deploy: entry point {own} (Zygote itself; nothing saved in Runtime).')
+            self.show_toast(f'Entry point set to {own}')
+            return
+        found = core.entry_candidates(project)
+        if not found:
+            self.say('Deploy: no entry point is set and no main.py, __main__.py, app.py or run.py was found. Set it in Project settings > Runtime.')
+            return
+        picked = self.ask_entry(found)
+        if picked is None:
+            raise core.ZygoteError('Deploy needs the program to start: no entry point was picked.')
+        current = core.run_settings(project, 'runtime')
+        core.set_run_settings(project, 'runtime', current['runner'] or core.runner_hint(picked, 'runtime'), picked, current['args'])
+        self.say(f'Entry point saved in Runtime: {picked}.')
+
+    def ask_replace_folder(self, folder):
+        """The deploy folder of an earlier Deploy is there: it is deleted with everything in it and made again. No is the default. Tests replace this."""
+        box = QMessageBox(QMessageBox.Question, 'Zygote \u2014 deploy', f'{folder} is there from an earlier Deploy.\n\nDelete it and make it again?', QMessageBox.Yes | QMessageBox.No, self)
+        box.setDefaultButton(QMessageBox.No)
+        return box.exec() == QMessageBox.Yes
+
+    def deploy_folder(self, project, plan):
+        """The folder target: one folder (setup.bat, setup.sh, setup.command and program\\) in the deploy folder; no exe."""
+        from functional import deploy as deploying
+        if deploying.old_folder(project) is not None:
+            if not self.ask_replace_folder(deploying.old_folder(project)):
+                self.say('Cancelled: the earlier deploy folder is left alone')
+                return
+            deploying.remove_folder(project)
+        self.say('Making the deploy folder\u2026')
+        folder, count = deploying.build_folder(project)
+        self.refresh()
+        self.say(f'Wrote deploy\\{folder.name}: {count} project files in program\\, and setup.bat / setup.sh / setup.command at the top. On the computer that will run it: run the setup file for the system once, then program\\start.bat (or start.sh, start.command). Zip the folder to share it.')
+        core.show_in_explorer(folder)
 
     def ask_drop(self, judged):
         """A dropped build that goes back to an older version (or has no version to compare): ask, and No is the default. Tests replace this."""
@@ -2289,16 +2630,31 @@ class MainWindow(QMainWindow):
         return box.exec() == QMessageBox.Yes
 
     def refuse_drop(self, judged):
-        """A dropped build that is not an update of this project: said loudly and not unpacked. When it is another project's build, a second button offers to open it as a
-        new project (True is returned for it). Tests replace this."""
-        box = QMessageBox(QMessageBox.Critical, 'Zygote - not an update of this project', '', QMessageBox.NoButton, self)
+        """A dropped build that is not an update of this project: said loudly, not unpacked, and it only talks. When the project it belongs to is found beside this one
+        the box says where it is (and OK brings its window forward when it is open). There is no button that makes a new project here: recovery is a ZIP dropped on the
+        Zygote icon or on a Zygote window with no project open. Tests replace this."""
+        words = judged['text']
+        right = judged.get('right')
+        running = False
+        if judged.get('wrong_name') is None:
+            pass
+        elif right is None:
+            words += ('\n\nZygote did not find that project next to this one.\nIf you are trying to RECOVER it, drop the ZIP on the Zygote icon, or on a Zygote window '
+                      'with no project open.')
+        elif InstanceGuard.is_running(core.clean_path(right)):
+            running = True
+            words += f'\n\nYou have {right.name} open in another window. Press OK and it comes forward; drop the ZIP there.'
+        else:
+            words += f'\n\n{right.name} is here: {right}\nIt is not open. Open it the way you always do, then drop the ZIP on it.'
+        box = QMessageBox(QMessageBox.Critical, 'Zygote - wrong project', '', QMessageBox.NoButton, self)
         box.setTextFormat(Qt.RichText)
-        box.setText(f'<b>{html.escape(judged["text"]).replace(chr(10), "<br>")}</b>')      # no colour of its own: the dialog's words follow the brightness of the person's colour (theme)
-        new = box.addButton('Open as a new project', QMessageBox.AcceptRole) if judged.get('new_project') else None
+        box.setText(f'<b>{html.escape(words).replace(chr(10), "<br>")}</b>')      # no colour of its own: the dialog's words follow the brightness of the person's colour (theme)
         ok = box.addButton('OK', QMessageBox.RejectRole)
         box.setDefaultButton(ok)
         box.exec()
-        return new is not None and box.clickedButton() is new
+        if running:
+            InstanceGuard.ask_running(core.clean_path(right))
+        return False
 
     def ask_new_project_place(self, zip_path, name):
         """Where the new project's folder goes: the person picks the folder it is made in (the folder NAME is made inside it). None = cancelled. Tests replace this."""
@@ -2330,38 +2686,129 @@ class MainWindow(QMainWindow):
             self.open_in_own_window(dest)
         return dest
 
+    def ask_stop_and_retry(self, files):
+        """An update is blocked by files in use while a program started from the Console tab runs. True = stop THAT program and try again. Tests replace this."""
+        shown = '\n  '.join(files[:8]) + (f'\n  … and {len(files) - 8} more' if len(files) > 8 else '')
+        return QMessageBox.question(self, 'Zygote - update blocked', f'These files are in use:\n  {shown}\n\nThe program you started in the Console is still running. '
+                                    'Stop it and try the update again?') == QMessageBox.Yes
+
     def install_zip(self, zip_path):
         """Take in one build ZIP. The guard judges it first (another project's build is refused, an older version is asked about); raises on any problem."""
         if self.project is None:                                # nothing to update: the ZIP can only become a project of its own
             return self.open_zip_as_new_project(zip_path)
         project = self.project
+        self.show_toast(f'Updating from {Path(zip_path).name} …', hold=True)       # at the instant of the drop: a heavy project takes a while before "Updated"
+        try:
+            return self.install_checked(zip_path, project)
+        finally:
+            if getattr(self, 'toast', None) is not None and not self.toast.timer_started():
+                self.close_toast()                              # no end toast came (cancelled, refused or failed): the "Updating" toast does not stay
+
+    def install_checked(self, zip_path, project):
         plan = core.inspect_zip(zip_path)
         judged = core.check_drop(project, plan)
         if judged['verdict'] == 'refuse':
+            self.close_toast()
             self.say(f'Refused: {Path(zip_path).name} is not an update of this project. Nothing was unpacked.')
-            if self.refuse_drop(judged):
-                return self.open_zip_as_new_project(zip_path)
+            self.refuse_drop(judged)
             return None
-        if judged['verdict'] != 'ok' and not self.ask_drop(judged):
-            self.say(f'Cancelled: {Path(zip_path).name} left alone')
+        if judged['verdict'] != 'ok':
+            self.close_toast()                                  # a question is on the screen: the toast would sit on top of it
+            if not self.ask_drop(judged):
+                self.say(f'Cancelled: {Path(zip_path).name} left alone')
+                return None
+            self.show_toast(f'Updating from {Path(zip_path).name} …', hold=True)
+        try:
+            report = self.install_asking(zip_path, project)
+        except core.LockedFiles as error:
+            if self.console is None or not self.console.is_running():
+                raise
+            self.close_toast()                                  # a question is coming
+            if not self.ask_stop_and_retry(error.files):
+                raise
+            self.show_toast(f'Updating from {Path(zip_path).name} …', hold=True)
+            self.console.stop(force=True)                        # one press, one program: the one this window started in its Console tab
+            self.wait_until_ended(self.console)
+            if self.console.is_running():
+                raise core.ZygoteError('The program in the Console did not end. Nothing was changed.') from error
+            self.say('The program in the Console was stopped; the update is tried again.')
+            report = self.install_asking(zip_path, project)
+        if report is None:
+            self.say(f'Cancelled: {Path(zip_path).name} left alone (the locked files asked about were not decided)')
             return None
-        report = core.install_zip(zip_path, project)
-        self.note(f'Installed {Path(zip_path).name}: {report["before"] or "?"} -> {report["after"] or "?"}')
+        self.note(f'Installed {Path(zip_path).name}: {report["before"] or "?"} -> {report["after"] or "?"}' +
+                  (f' ({len(report.get("kept", []))} locked kept)' if report.get('kept') else ''),
+                  {'zip': Path(zip_path).name, 'before': report['before'], 'after': report['after'], 'changed': report.get('files', []),
+                   'kept': report.get('kept', []), 'overridden': report.get('overridden', [])})
         self.refresh()
         direction = core.version_direction(report['before'], report['after'])
         headline = f'Updated {report["before"] or "?"} -> {report["after"] or "?"} ({direction})'
         self.say(f'{Path(zip_path).name}: {headline}, {report["written"]} files replaced  (Project > Revert project… puts them back)')
-        self.show_toast(f'Updated to {report["after"] or "?"}' + (f'  (older than {report["before"]})' if direction == 'back' else ''))
+        if report.get('core_kept'):
+            sentence = core.core_guard_sentence(report['core_kept'])
+            self.say(sentence)
+            self.note(sentence)
+            self.show_warning_toast(sentence)
+        else:
+            self.show_toast(f'Updated to {report["after"] or "?"}' + (f'  (older than {report["before"]})' if direction == 'back' else ''))
         names = core.protected_folders(report['skipped'])
         if names:
             self.say_protected('Not overwritten:', names)
+        if report.get('kept'):
+            self.say(f'Locked, not replaced ({len(report["kept"])}): ' + ', '.join(report['kept'][:12]) + (' …' if len(report['kept']) > 12 else ''))
+        if report.get('overridden'):
+            self.say(f'Locked, replaced because you allowed it ({len(report["overridden"])}): ' + ', '.join(report['overridden'][:12]))
         if report['restart_needed']:
             self.offer_restart(headline)
         return report
 
-    def show_toast(self, text):
-        """A message over the window that goes away by itself after about two seconds (the person sees at once which version was taken)."""
-        self.toast = Toast(self, text)
+    def install_asking(self, zip_path, project):
+        """core.install_zip, and when locked files in the ZIP need a decision, the panel asks. None = the person cancelled the panel (nothing was changed)."""
+        try:
+            return core.install_zip(zip_path, project)
+        except core.HeldFiles as asked:
+            self.close_toast()
+            chosen = self.ask_held(asked.files)
+            if chosen is None:
+                return None
+            self.show_toast(f'Updating from {Path(zip_path).name} …', hold=True)
+            return core.install_zip(zip_path, project, set(chosen))
+
+    def ask_held(self, files):
+        """The panel of the locked files a ZIP carries that Zygote cannot call stale. The files ticked (replaced this once; they stay locked), or None for Cancel. Tests replace this."""
+        dialog = HeldFilesDialog(files, self)
+        return dialog.chosen if dialog.exec() == QDialog.Accepted else None
+
+    def show_toast(self, text, hold=False):
+        """A message over the window that goes away by itself after about two seconds (the person sees at once which version was taken). The one before it is closed first.
+        hold = True keeps it until the next toast or close_toast (work that takes a while)."""
+        self.put_toast(text, hold, False)
+
+    def show_warning_toast(self, text):
+        """The red toast: something the person must act on (a ZIP carrying an old core). Five seconds, the theme's error colour. Same machinery as show_toast."""
+        self.put_toast(text, False, True)
+
+    def put_toast(self, text, hold, warning):
+        self.let_held_toast_be_seen()
+        self.close_toast()
+        self.toast = Toast(self, text, hold, warning)
+        if hold:
+            QApplication.processEvents()                       # painted now, before the work that blocks this thread starts
+
+    def let_held_toast_be_seen(self):
+        """A held toast (Updating) that the next toast would replace within a blink is left on screen until it has been seen for Toast.MINIMUM_HELD seconds."""
+        toast = getattr(self, 'toast', None)
+        if toast is None or toast.closed or not toast.held:
+            return
+        while toast.seen_for() < Toast.MINIMUM_HELD:
+            QApplication.processEvents()
+            QThread.msleep(25)
+
+    def close_toast(self):
+        toast = getattr(self, 'toast', None)
+        if toast is not None:
+            toast.close_toast()
+            self.toast = None
 
     def ask_replace_asset(self, dest):
         """A dropped asset has the name of one that is already there. True = replace it. Tests replace this."""

@@ -1,15 +1,17 @@
 """Zygote's dialogs: pick a project folder (drop it or browse), confirm the project (git, name, folder name), and Tools
 (which program opens which file type)."""
+import datetime
 import html
 from pathlib import Path
 
 from PySide6.QtCore import Signal, QProcess, QProcessEnvironment, Qt
-from PySide6.QtGui import QAction, QColor, QPixmapCache, QGuiApplication, QIcon, QImage, QKeySequence, QPixmap, QTextCursor
+from PySide6.QtGui import QAction, QBrush, QColor, QPixmapCache, QGuiApplication, QIcon, QImage, QKeySequence, QPixmap, QTextCursor
 from PySide6.QtWidgets import (QWidget, QAbstractItemView, QCheckBox, QComboBox, QScrollArea, QGroupBox, QMessageBox, QPlainTextEdit, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGridLayout, QHBoxLayout,
-                               QColorDialog, QInputDialog, QLabel, QLineEdit, QPushButton, QRadioButton, QTableWidget, QTableWidgetItem, QVBoxLayout)
+                               QColorDialog, QInputDialog, QLabel, QLineEdit, QPushButton, QRadioButton, QTableWidget, QTableWidgetItem, QListWidget, QListWidgetItem, QTreeWidget, QTreeWidgetItem, QVBoxLayout)
 
 import crashlog
 from functional import core, icons
+from ui_ux.theme import Theme
 
 
 class DropBox(QLabel):
@@ -366,6 +368,7 @@ class ProjectSettingsDialog(QDialog):
     Cancel: closes, nothing more written (the Debug / Runtime choice is saved the moment it is made, like the Debug menu's check box). The panel is never reused after it closes: the window makes a new one each time."""
     saved = Signal()
     mode_changed = Signal(str)                                                 # the Debug / Runtime radio buttons were pressed: the window saves the mode at once
+    look_requested = Signal()                                                  # the Look button: the window opens the preferences panel (theme and outer colour)
     RUNNERS = ('', 'python', 'pythonw', 'ipython -i', 'py')
 
     def __init__(self, folder, name, runs, external, mode, parent=None, icon=''):
@@ -413,6 +416,10 @@ class ProjectSettingsDialog(QDialog):
         name_column.addWidget(self.name_edit)
         self.rename_box = QCheckBox('Also rename the folder to match the project name')
         name_column.addWidget(self.rename_box)
+        self.look_button = QPushButton('Theme and outer colour…')                      # the look is part of the project: one Settings place
+        self.look_button.setToolTip('The look (theme, outer colour) is saved in this project and travels with it.')
+        self.look_button.clicked.connect(self.look_requested.emit)
+        name_column.addWidget(self.look_button, 0, Qt.AlignLeft)
         layout.addWidget(name_group)
         console_group = QGroupBox('Console')
         console_column = QVBoxLayout(console_group)
@@ -603,10 +610,11 @@ class ProjectSettingsDialog(QDialog):
         return dialog.mode() if dialog.exec() == QDialog.Accepted else None
 
     def pick_icon_path(self):
-        """The file picker of Browse…: starts in the project's app_tree\\assets folder (the icons folder is inside it). Tests replace this."""
-        start = core.zpath(core.clean_path(self.folder), 'assets')
+        """The file picker of Browse…: starts in the project's icons folder (app_tree\\assets\\icons) so the whole set shows at once; a project without that folder starts in
+        Zygote's own icon set. Tests replace this."""
+        start = core.icons_dir(self.folder)
         if not start.is_dir():
-            start = core.clean_path(self.folder)
+            start = core.ICON_SET
         return QFileDialog.getOpenFileName(self, 'Choose the program icon', str(start),
                                            'Icons and pictures (*.ico *.png *.bmp *.jpg *.jpeg *.gif *.webp *.tif *.tiff)')[0]
 
@@ -891,38 +899,79 @@ class PreferencesDialog(QDialog):
         super().reject()
 
 
+class GitSettingsDialog(QDialog):
+    """Settings > Git settings…: which program does the Git work, TortoiseGit (its own windows) or the command line git. This computer's choice."""
+
+    def __init__(self, program, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle('Zygote — Git settings')
+        self.setMinimumWidth(480)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel('Commit, New branch and Undo last Git step use the program chosen here. Each press starts one program, once.'))
+        self.tortoise = QRadioButton('TortoiseGit (its own windows)')
+        self.commandline = QRadioButton('Command line git (Zygote asks for what it needs, then runs git)')
+        layout.addWidget(self.tortoise)
+        layout.addWidget(self.commandline)
+        (self.commandline if program == 'commandline' else self.tortoise).setChecked(True)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def program(self):
+        return 'commandline' if self.commandline.isChecked() else 'tortoise'
+
+
 class ToolsDialog(QDialog):
-    """Settings > Tools: one row per group of file types (from assets/tools_defaults.json, plus any type the person saved on its own). Each row has the file
-    types as a list (commas or semicolons) and a drop list of the programs found on this computer. Works on a copy; the caller saves values() on accept."""
+    """Tools > Settings…: (1) one row per group of file types (from assets/tools_defaults.json, plus any type the person saved on its own): the file types as a list
+    (commas or semicolons) and a drop list of the programs found on this computer; (2) Command line tools: a menu name, a command (<file> = the selected file,
+    <folder> = the folder in view), and two ticks. Every row has an X that removes it after a question. Works on copies; accept() saves both lists."""
 
     OTHER = 'Other program…'
 
-    def __init__(self, mapping, parent=None):
+    def __init__(self, mapping, parent=None, commands=None):
         super().__init__(parent)
-        self.setWindowTitle('Zygote — tools: which program opens which file')
-        self.setMinimumSize(760, 420)
-        self.rows = []                                         # [(types edit, program combo)]
+        self.setWindowTitle('Zygote — tools')
+        self.setMinimumSize(900, 560)
+        self.rows = []                                         # [(types edit, program combo)] of the rows still there
+        self.row_buttons = []                                  # the X of each row, same order as self.rows
+        self.command_rows = []                                 # [{'name', 'command', 'console', 'keep_open', 'button'}] of the rows still there
+        self.removed_widgets = []
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel('A double-click opens each list of file types with the program chosen in its drop list. The drop list shows the programs found on this computer.'))
+        layout.addWidget(QLabel('<b>Which program opens which file</b><br>A double-click opens each list of file types with the program chosen in its drop list. The drop list shows the programs found on this computer.'))
         self.grid = QGridLayout()
         self.grid.addWidget(QLabel('File types (separate with commas or semicolons)'), 0, 0)
         self.grid.addWidget(QLabel('Opens with'), 0, 1)
         layout.addLayout(self.grid)
-        layout.addStretch(1)
-        self.error = QLabel('')
-        self.error.setObjectName('error')
-        layout.addWidget(self.error)
         row = QHBoxLayout()
         self.add_button = QPushButton('Add a row…')
         self.add_button.clicked.connect(lambda: self.add_row([], core.WINDOWS_OWN))
         row.addWidget(self.add_button)
         row.addStretch(1)
         layout.addLayout(row)
+        layout.addWidget(QLabel('<b>Command line tools</b><br>Each one is a menu entry under Tools. <code>&lt;file&gt;</code> is the selected file, <code>&lt;folder&gt;</code> the folder in view; Zygote writes them '
+                                'relative to the project root and puts quotes around them. Each press starts one process.'))
+        self.command_grid = QGridLayout()
+        for column, title in enumerate(('Menu name', 'Command', 'Run in Zygote Console', 'Keep console open (external)')):
+            self.command_grid.addWidget(QLabel(title), 0, column)
+        layout.addLayout(self.command_grid)
+        row = QHBoxLayout()
+        self.add_command_button = QPushButton('Add a row…')
+        self.add_command_button.clicked.connect(lambda: self.add_command_row())
+        row.addWidget(self.add_command_button)
+        row.addStretch(1)
+        layout.addLayout(row)
+        layout.addStretch(1)
+        self.error = QLabel('')
+        self.error.setObjectName('error')
+        layout.addWidget(self.error)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
         self.fill(dict(mapping))
+        for tool in (core.command_tools() if commands is None else commands):
+            self.add_command_row(tool)
 
     def fill(self, mapping):
         covered = set()
@@ -937,6 +986,29 @@ class ToolsDialog(QDialog):
         for program, types in extra.items():
             self.add_row(types, program)
 
+    def ask_remove(self, what):
+        """A row is about to go: True when the person agrees. No is the default. Tests replace this."""
+        box = QMessageBox(QMessageBox.Question, 'Zygote — remove this row?', f'Remove {what}?\n\nNothing is saved until you press OK.', QMessageBox.Yes | QMessageBox.No, self)
+        box.setDefaultButton(QMessageBox.No)
+        return box.exec() == QMessageBox.Yes
+
+    def remover(self, grid, row_number, widgets, what, forget):
+        button = QPushButton('X')
+        button.setFixedWidth(28)
+        button.setToolTip('Remove this row')
+        button.clicked.connect(lambda: self.remove_row(widgets + [button], what, forget))
+        return button
+
+    def remove_row(self, widgets, what, forget):
+        if not self.ask_remove(what()):
+            return False
+        forget()
+        for widget in widgets:
+            widget.hide()
+            widget.setParent(None)
+            self.removed_widgets.append(widget)
+        return True
+
     def add_row(self, types, chosen):
         number = len(self.rows) + 1
         edit = QLineEdit(', '.join(types))
@@ -944,9 +1016,31 @@ class ToolsDialog(QDialog):
         combo.setMinimumWidth(360)
         self.load_combo(combo, types, chosen)
         combo.activated.connect(lambda _index, box=combo: self.maybe_other(box))
+        entry = (edit, combo)
+        button = self.remover(self.grid, number, [edit, combo], lambda: 'the row for ' + (edit.text().strip() or 'this empty list'), lambda: self.rows.remove(entry))
         self.grid.addWidget(edit, number, 0)
         self.grid.addWidget(combo, number, 1)
-        self.rows.append((edit, combo))
+        self.grid.addWidget(button, number, 2)
+        self.rows.append(entry)
+        self.row_buttons.append(button)
+        return entry
+
+    def add_command_row(self, tool=None):
+        tool = tool or {'name': '', 'command': '', 'console': True, 'keep_open': True}
+        number = len(self.command_rows) + 1
+        name, command = QLineEdit(tool['name']), QLineEdit(tool['command'])
+        name.setMinimumWidth(120)
+        command.setMinimumWidth(320)
+        console, keep = QCheckBox(), QCheckBox()
+        console.setChecked(bool(tool['console']))
+        keep.setChecked(bool(tool['keep_open']))
+        entry = {'name': name, 'command': command, 'console': console, 'keep_open': keep}
+        button = self.remover(self.command_grid, number, [name, command, console, keep], lambda: 'the tool ' + (name.text().strip() or 'in this empty row'), lambda: self.command_rows.remove(entry))
+        for column, widget in enumerate((name, command, console, keep, button)):
+            self.command_grid.addWidget(widget, number, column)
+        entry['button'] = button
+        self.command_rows.append(entry)
+        return entry
 
     def load_combo(self, combo, types, chosen):
         combo.clear()
@@ -987,9 +1081,23 @@ class ToolsDialog(QDialog):
                 mapping[extension] = combo.currentData() or core.WINDOWS_OWN
         return mapping
 
+    def command_values(self):
+        """[{'name', 'command', 'console', 'keep_open'}] for every row that has something in it (a row with nothing typed is left out); a half-filled row fails loud."""
+        tools = []
+        for entry in self.command_rows:
+            name, command = entry['name'].text().strip(), entry['command'].text().strip()
+            if not name and not command:
+                continue
+            tools.append(core.check_command_tool({'name': name, 'command': command, 'console': entry['console'].isChecked(), 'keep_open': entry['keep_open'].isChecked()}))
+        return tools
+
     def accept(self):
         try:
-            core.save_associations(self.values())
+            mapping, tools = self.values(), self.command_values()
+            for extension, program in mapping.items():
+                core.check_association(extension, program)
+            core.save_command_tools(tools)                     # checks the names are different before anything is written
+            core.save_associations(mapping)
         except core.ZygoteError as error:
             self.error.setText(str(error))
             return
@@ -1052,12 +1160,13 @@ class RevertDialog(QDialog):
 class AboutDialog(QDialog):
     """Help > About Zygote: the icon, the running version, when it was built, and where it lives. Read-only."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, notice=''):
         super().__init__(parent)
         self.setWindowTitle('About Zygote')
+        self.notice = notice
         picture = QLabel()
         picture.setPixmap(QPixmap(str(core.ICON_FILE.with_suffix('.png'))).scaled(96, 96, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        text = QLabel(self.lines())
+        text = QLabel(self.lines(notice))
         text.setTextInteractionFlags(Qt.TextSelectableByMouse)
         row = QHBoxLayout()
         row.addWidget(picture, 0, Qt.AlignTop)
@@ -1081,7 +1190,8 @@ class AboutDialog(QDialog):
             window.guarded(window.update_core)
 
     @staticmethod
-    def lines():
+    def lines(notice=''):
+        """The About text. `notice` is the open project's own copyright and license line (core.license_notice); '' shows none."""
         import platform
         import PySide6
         out = [f'<h2>Zygote {core.RUNNING_VERSION}</h2>', 'A project manager: drop a ZIP, run, test, revert.',
@@ -1090,6 +1200,8 @@ class AboutDialog(QDialog):
             out.append(f'<p><b>The disk has {html.escape(core.tool_version())}: use File &gt; Restart Zygote to run it.</b></p>')
         out.append(f'<p>Folder: {html.escape(str(core.ZYGOTE_ROOT))}<br>Python {platform.python_version()}, PySide6 {PySide6.__version__}</p>')
         out.append('© Luis R. Lopez (RedHorseVR). All rights reserved.')
+        if notice:
+            out.append(f'<p><b>This project:</b> {html.escape(notice)}</p>')
         return ''.join(out)
 
 
@@ -1157,6 +1269,7 @@ class DeployDialog(QDialog):
         super().__init__(parent)
         from functional import deploy
         self.requirements, self.window, self.args, self.ticked = saved['requirements'], saved['window'], saved['args'], []
+        self.target = saved.get('target', 'folder')
         self.setWindowTitle('Zygote — deploy')
         font = self.font()
         font.setPointSizeF(max(font.pointSizeF(), 9) + self.BIGGER)
@@ -1170,17 +1283,26 @@ class DeployDialog(QDialog):
         layout = QVBoxLayout(body)
         scroll.setWidget(body)
         outer.addWidget(scroll, 1)
-        intro = QLabel(f'Deploy makes ONE program (an exe) with {plan["name"]} inside. On another computer it unpacks the folder '
-                       f'{deploy.home_name(project)} beside itself, makes the environment when one is needed, and starts {plan["entry"]}.')
+        intro = QLabel(f'Deploy makes a package of {plan["name"]} for another computer: a FOLDER with start files (Windows, Linux, Mac; no exe, so Windows Defender leaves it alone), '
+                       f'or ONE exe that unpacks the folder {deploy.home_name(project)} beside itself. The exe makes the environment when one is needed and starts {plan["entry"]}; the folder has setup files and makes it when setup is run.')
         intro.setWordWrap(True)
         layout.addWidget(intro)
         layout.addWidget(self.heading('Options'))
+        self.form_runtime = QRadioButton('Runtime copy: only what runs the program')
+        self.form_development = QRadioButton('Development copy: the project to work on, with its Git history')
+        self.form_runtime.setChecked(True)
+        self.form_development.setEnabled(False)                  # greyed until the development form is built and tested
+        self.form_development.setToolTip('Not built yet')
+        layout.addWidget(self.form_runtime)
+        layout.addWidget(self.form_development)
         self.window_box = QCheckBox('The program has its own window (no console window)')
         self.window_box.setChecked(saved['window'])
         layout.addWidget(self.window_box)
-        where = QLabel(f'Will be written to: {deploy.exe_path(project)}')
-        where.setWordWrap(True)
-        layout.addWidget(where)
+        self.folder_radio = QRadioButton(f'A folder with setup files (setup.bat, setup.sh, setup.command) and the program: {deploy.folder_path(project)}')
+        self.exe_radio = QRadioButton(f'One exe (Windows; an antivirus may delete an unsigned one): {deploy.exe_path(project)}')
+        (self.exe_radio if saved.get('target') == 'exe' else self.folder_radio).setChecked(True)
+        layout.addWidget(self.folder_radio)
+        layout.addWidget(self.exe_radio)
         self.requirements_box = None
         offer = deploy.requirements_offer(project)
         if offer:
@@ -1190,17 +1312,33 @@ class DeployDialog(QDialog):
             self.requirements_box.setChecked(offer[1])
             layout.addWidget(self.requirements_box)
         self.item_boxes = {}
+        self.boxes = {}                                          # title -> its group box (the required ones are greyed out: Deploy decides them)
+        program_layout = None
         for title, items in deploy.sections(project):
-            layout.addWidget(self.heading(title))
+            required = title != 'Optional (your choice)'
+            group = QGroupBox(title)
+            column = QVBoxLayout(group)
             for one in items:
                 box = QCheckBox(one['label'])
                 box.setChecked(one['ticked'])
                 box.setEnabled(not one['required'])
                 box.setToolTip(one['why'])
                 self.item_boxes[one['key']] = box
-                layout.addWidget(box)
+                column.addWidget(box)
                 if one['why']:
-                    layout.addWidget(self.note(one['why']))
+                    column.addWidget(self.note(one['why']))
+            self.boxes[title] = group
+            if title == 'Assets' and program_layout is not None:        # the assets belong to the program: a box inside its box
+                program_layout.addWidget(group)
+                continue
+            if title == 'Program (required)':
+                program_layout = column
+            group.setEnabled(not required)
+            layout.addWidget(group)
+        if 'Assets' in self.boxes and program_layout is not None:
+            self.boxes['Program (required)'].setEnabled(False)
+        elif 'Assets' in self.boxes:
+            self.boxes['Assets'].setEnabled(False)
         needs = deploy.runtime_needs(project)
         if needs:
             layout.addWidget(self.heading('Not copied, checked on the computer'))
@@ -1231,6 +1369,7 @@ class DeployDialog(QDialog):
     def accept(self):
         self.requirements = self.requirements_rel if self.requirements_box is not None and self.requirements_box.isChecked() else ''
         self.window = self.window_box.isChecked()
+        self.target = 'exe' if self.exe_radio.isChecked() else 'folder'
         self.ticked = [name for name, box in self.item_boxes.items() if box.isChecked()]
         super().accept()
 
@@ -1293,3 +1432,486 @@ class CleanupDialog(QDialog):
 
     def chosen(self):
         return [one for one, box in zip(self.items, self.boxes) if box.isChecked()]
+
+
+class LicenseFields(QWidget):
+    """The license settings, one set of boxes for Project > License settings… and Project > New…: developer and organization (each with a copyright tick), the year and ONE
+    license line with ONE button. The line's first entry is "(none)", or the NAME of the project's own license file when there is one; the other entries are the standard
+    types. The button follows the line: Browse… while there is no license file (it finds one, and the line then shows its name), Open when there is one to show."""
+
+    NONE = '(none)'
+
+    def __init__(self, record, parent=None, project=None):
+        super().__init__(parent)
+        self.project = project
+        self.pending = ''                                        # a file found with Browse…, used when the dialog is accepted
+        self.own = core.own_license_file(project, record) if project is not None else ''
+        form = QGridLayout(self)
+        form.setContentsMargins(0, 0, 0, 0)
+        self.developer, self.organization, self.year = QLineEdit(), QLineEdit(), QLineEdit()
+        self.developer_copyright, self.organization_copyright = QCheckBox('Copyright'), QCheckBox('Copyright')
+        self.type = QComboBox()
+        self.button = QPushButton('Browse…')
+        form.addWidget(QLabel('Developer'), 0, 0)
+        form.addWidget(self.developer, 0, 1)
+        form.addWidget(self.developer_copyright, 0, 2)
+        form.addWidget(QLabel('Organization'), 1, 0)
+        form.addWidget(self.organization, 1, 1)
+        form.addWidget(self.organization_copyright, 1, 2)
+        form.addWidget(QLabel('Year'), 2, 0)
+        form.addWidget(self.year, 2, 1)
+        form.addWidget(QLabel('License'), 3, 0)
+        form.addWidget(self.type, 3, 1)
+        form.addWidget(self.button, 3, 2)
+        self.type.currentIndexChanged.connect(self.show_button)
+        self.set_record(record)
+
+    def fill_list(self):
+        """The first entry shows the license file's name (type Custom: the project's own file) or (none); the rest are the standard types."""
+        self.type.blockSignals(True)
+        self.type.clear()
+        name = Path(self.pending).name if self.pending else self.own
+        self.type.addItem(name or self.NONE, 'Custom' if name else '')
+        for kind in core.LICENSE_TYPES:
+            if kind != 'Custom':
+                self.type.addItem(kind, kind)
+        self.type.blockSignals(False)
+
+    def set_record(self, record):
+        self.developer.setText(record['developer'])
+        self.developer_copyright.setChecked(record['developer_copyright'])
+        self.organization.setText(record['organization'])
+        self.organization_copyright.setChecked(record['organization_copyright'])
+        self.year.setText(record['year'])
+        self.file = record['file'] if record['type'] == 'Custom' or self.own else core.LICENSE_FILE
+        self.fill_list()
+        self.type.setCurrentIndex(max(0, self.type.findData(record['type'] if record['type'] not in ('Custom', '') else self.type.itemData(0))))
+        self.show_button()
+
+    def has_file(self):
+        """True when the line points at a license file that can be shown (the project's own, the file just found, or a standard type's text)."""
+        return self.type.currentData() not in ('',)
+
+    def show_button(self):
+        self.button.setText('Open' if self.has_file() else 'Browse…')
+        self.button.setToolTip('Show the license text' if self.has_file() else 'Find a license file (a file of another project, say) and use it')
+
+    def found(self, path):
+        """Browse… found a file: the line shows its name."""
+        self.pending = str(path)
+        self.fill_list()
+        self.type.setCurrentIndex(0)
+        self.show_button()
+
+    def shown_file(self):
+        """The file Open shows: the project's own / the found one, the LICENSE written for the chosen type, else Zygote's own copy of that type's text."""
+        kind = self.type.currentData()
+        if kind == 'Custom':
+            return Path(self.pending) if self.pending else core.clean_path(self.project) / self.own
+        if self.project is not None and (core.clean_path(self.project) / core.LICENSE_FILE).is_file():
+            written = core.clean_path(self.project) / core.LICENSE_FILE
+            if written.read_text(encoding='utf-8', errors='replace') == core.license_text(dict(self.record(), type=kind)):
+                return written
+        return core.LICENSE_TEXTS / f'{kind}.txt'
+
+    def record(self):
+        kind = self.type.currentData() or ''
+        file = core.LICENSE_FILE
+        if kind == 'Custom' and self.pending:
+            file = (core.project_relative(self.project, self.pending) if self.project is not None else None) or core.LICENSE_FILE    # a file inside the project stays where it is
+        elif kind == 'Custom':
+            file = self.own or core.LICENSE_FILE
+        return {'developer': self.developer.text(), 'developer_copyright': self.developer_copyright.isChecked(), 'organization': self.organization.text(),
+                'organization_copyright': self.organization_copyright.isChecked(), 'year': self.year.text(), 'type': kind, 'file': file}
+
+
+class LicenseDialog(QDialog):
+    """Project > License settings…: the project's developer, organization, year and license. OK saves the record in the project's config (it travels in a ZIP). A standard type
+    writes LICENSE; a LICENSE that holds something else is asked about first (No is the default) and, when replaced, kept as LICENSE.old. A file found with Browse… is used."""
+
+    def __init__(self, project, parent=None):
+        super().__init__(parent)
+        self.project = project
+        self.setWindowTitle('Zygote — license settings')
+        self.setMinimumWidth(560)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(f'Copyright and license of {core.project_name(project)}. Saved with the project.'))
+        self.fields = LicenseFields(core.license_record(project) or core.license_defaults(), project=project)
+        self.fields.button.clicked.connect(self.button_pressed)
+        layout.addWidget(self.fields)
+        self.error = QLabel('')
+        self.error.setObjectName('error')
+        layout.addWidget(self.error)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        self.result_text = ''
+
+    def pick_license_file(self):
+        """The file picker of Browse…: starts in the project. Tests replace this."""
+        return QFileDialog.getOpenFileName(self, 'Find the license file', str(core.clean_path(self.project)), 'All files (*)')[0]
+
+    def ask_replace(self, name):
+        """A standard type would replace a license file that holds something else. True when the person agrees; No is the default. Tests replace this."""
+        box = QMessageBox(QMessageBox.Question, 'Zygote — replace the license file?', f'{name} is in the project and holds another license.\n\nReplace it? The old file is kept as {name}.old.',
+                          QMessageBox.Yes | QMessageBox.No, self)
+        box.setDefaultButton(QMessageBox.No)
+        return box.exec() == QMessageBox.Yes
+
+    def button_pressed(self):
+        try:
+            self.error.setText('')
+            if self.fields.has_file():
+                core.open_file(self.fields.shown_file())
+                return
+            path = self.pick_license_file()
+            if path:
+                self.fields.found(path)
+        except core.ZygoteError as error:
+            self.error.setText(str(error))
+
+    def accept(self):
+        try:
+            record = self.fields.record()
+            if record['type'] == 'Custom' and self.fields.pending:
+                record['file'] = core.adopt_license_file(self.project, self.fields.pending)
+            elif core.license_file_in_the_way(self.project, record) and not self.ask_replace(record['file']):
+                return                                           # No: nothing changes, the box stays open
+            saved = core.save_license(self.project, record)
+            kind = core.write_license_file(self.project, saved, replace=True)
+        except core.ZygoteError as error:
+            self.error.setText(str(error))
+            return
+        self.result_text = {'written': f'License saved; {saved["file"]} written.', 'replaced': f'License saved; {saved["file"]} replaced, the old one is {saved["file"]}.old.',
+                            'kept': f'License saved; {saved["file"]} is as it was.'}.get(kind, 'License saved.')
+        super().accept()
+
+
+class NewProjectDialog(QDialog):
+    """Project > New…: the name, the folder to make it in, and the license settings. values() is (parent folder, name, license record)."""
+
+    def __init__(self, parent_folder, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle('Zygote — new project')
+        self.setMinimumWidth(600)
+        layout = QVBoxLayout(self)
+        form = QGridLayout()
+        self.name = QLineEdit()
+        self.folder = QLineEdit(str(parent_folder))
+        self.browse = QPushButton('Browse…')
+        self.browse.clicked.connect(self.browse_folder)
+        form.addWidget(QLabel('Project name'), 0, 0)
+        form.addWidget(self.name, 0, 1, 1, 2)
+        form.addWidget(QLabel('Make it in the folder'), 1, 0)
+        form.addWidget(self.folder, 1, 1)
+        form.addWidget(self.browse, 1, 2)
+        layout.addLayout(form)
+        layout.addWidget(QLabel('The project folder is made inside that folder. Developer, organization and license can be changed later (Project > License settings…).'))
+        self.fields = LicenseFields(core.license_defaults())
+        self.fields.button.clicked.connect(self.button_pressed)
+        layout.addWidget(self.fields)
+        self.error = QLabel('')
+        self.error.setObjectName('error')
+        layout.addWidget(self.error)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def browse_folder(self):
+        chosen = QFileDialog.getExistingDirectory(self, 'Make the project in which folder?', self.folder.text())
+        if chosen:
+            self.folder.setText(chosen)
+
+    def pick_license_file(self):
+        """The file picker of Browse…. Tests replace this."""
+        return QFileDialog.getOpenFileName(self, 'Find the license file', self.folder.text(), 'All files (*)')[0]
+
+    def button_pressed(self):
+        if self.fields.has_file():
+            try:
+                core.open_file(self.fields.shown_file())
+            except core.ZygoteError as error:
+                self.error.setText(str(error))
+            return
+        path = self.pick_license_file()
+        if path:
+            self.fields.found(path)
+
+    def values(self):
+        record = self.fields.record()
+        if self.fields.pending:
+            record['source'] = self.fields.pending               # copied into the new project as LICENSE (core.create_project)
+        return self.folder.text().strip(), self.name.text().strip(), record
+
+    def accept(self):
+        try:
+            parent, name, record = self.values()
+            core.check_new_project(parent, name)
+            if record.get('source') and not Path(record['source']).is_file():
+                raise core.ZygoteError(f'The license file is not a file: {record["source"]}')
+            core.check_license(record)
+        except core.ZygoteError as error:
+            self.error.setText(str(error))
+            return
+        super().accept()
+
+
+class TickListDialog(QDialog):
+    """A list of files with a tick each (all unticked), Continue and Cancel. One class for every "which of these may be replaced" question (locked files in a ZIP,
+    icons that differ from Zygote's set). Result: .chosen (the keys of the ticked lines) after accept(); Cancel changes nothing."""
+
+    def __init__(self, title, intro, lines, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setMinimumSize(640, 340)
+        self.chosen = None
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(intro))
+        self.list = QListWidget()
+        for key, text in lines:
+            entry = QListWidgetItem(text)
+            entry.setFlags(entry.flags() | Qt.ItemIsUserCheckable)
+            entry.setCheckState(Qt.Unchecked)
+            entry.setData(Qt.UserRole, key)
+            self.list.addItem(entry)
+        layout.addWidget(self.list, 1)
+        buttons = QDialogButtonBox(QDialogButtonBox.Cancel)
+        buttons.addButton('Continue', QDialogButtonBox.AcceptRole)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def accept(self):
+        self.chosen = [self.list.item(row).data(Qt.UserRole) for row in range(self.list.count()) if self.list.item(row).checkState() == Qt.Checked]
+        super().accept()
+
+
+class HeldFilesDialog(TickListDialog):
+    """A dropped ZIP carries locked files that Zygote cannot call stale: the ticked ones are replaced this once and stay locked, the others are kept as they are."""
+
+    def __init__(self, files, parent=None):
+        lines = [(one['rel'], one['rel'] + ('' if one['tracked'] else '     (no fingerprint yet: drop a ZIP and Zygote starts tracking this file)')) for one in files]
+        super().__init__('Zygote — locked files in this ZIP',
+                         'These files are locked, and the ZIP brings a copy that is not the one it brought last time (or Zygote has no record of the last copy).\n'
+                         'Tick the ones the ZIP may replace this once. The others are kept as they are. Every file stays locked.', lines, parent)
+
+
+class IconsDialog(TickListDialog):
+    """Icons of this project that differ from Zygote's own set: the ticked ones are replaced by Zygote's, the others are kept."""
+
+    def __init__(self, names, parent=None):
+        super().__init__("Zygote — icons that differ from Zygote's set",
+                         "These icons are in this project and are not the same as the ones in Zygote's set.\nTick the ones Zygote may replace. The others are kept as they are.",
+                         [(name, name) for name in names], parent)
+
+
+class HistoryTree(QTreeWidget):
+    """The history list: names can be selected, Ctrl+C copies the selected lines."""
+
+    def keyPressEvent(self, event):
+        if event.matches(QKeySequence.Copy):
+            QGuiApplication.clipboard().setText('\n'.join(item.text(0) for item in self.selectedItems()))
+            return
+        super().keyPressEvent(event)
+
+
+class HistoryWindow(QDialog):
+    """Project > Project history. One entry per event (oldest first). A dropped ZIP is an entry that opens into the files it changed, the locked ones it kept and the
+    locked ones you allowed it to replace. Search and a filter (all, drops, locked); a double-click on a file opens it; Ctrl+C copies the selected lines.
+    Archive: the selected entry and every entry above it go into a ZIP and one coloured line stands for them; a double-click on that line opens them in the list again,
+    and closing the window asks whether to put the opened archive back."""
+    FILTERS = ('All', 'Drops', 'Locked')
+
+    def __init__(self, title, data, project, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_DeleteOnClose)
+        self.setWindowTitle(title)
+        self.resize(900, 640)
+        self.project = Path(project)
+        self.opened = []                                           # the archive lines opened in the list, in the order they were opened
+        layout = QVBoxLayout(self)
+        top = QHBoxLayout()
+        self.search = QLineEdit()
+        self.search.setPlaceholderText('Search')
+        self.search.setClearButtonEnabled(True)
+        self.filter = QComboBox()
+        self.filter.addItems(self.FILTERS)
+        top.addWidget(self.search, 1)
+        top.addWidget(self.filter)
+        layout.addLayout(top)
+        self.tree = HistoryTree()
+        self.tree.setHeaderHidden(True)
+        self.tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.tree.setUniformRowHeights(True)
+        self.fill(data)
+        layout.addWidget(self.tree, 1)
+        self.archive_button = QPushButton('Archive up to the selected entry')
+        self.archive_button.clicked.connect(self.archive_selected)
+        close = QPushButton('Close')
+        close.clicked.connect(self.close)
+        row = QHBoxLayout()
+        row.addWidget(self.archive_button)
+        row.addStretch(1)
+        row.addWidget(close)
+        layout.addLayout(row)
+        self.search.textChanged.connect(self.apply_filter)
+        self.filter.currentIndexChanged.connect(self.apply_filter)
+        self.tree.itemDoubleClicked.connect(self.open_item)
+        self.tree.itemSelectionChanged.connect(self.sync_archive_button)
+        self.sync_archive_button()
+        self.tree.scrollToBottom()
+
+    def fill(self, data):
+        self.tree.clear()
+        self.heads = [QTreeWidgetItem(self.tree, [f'Started with Zygote:       {data.get("started_with", "?")}']),
+                      QTreeWidgetItem(self.tree, [f'Last opened with Zygote:   {data.get("last_upgraded_to", "?")}'])]
+        for event in data.get('events', []):
+            self.add_event(event, self.tree.topLevelItemCount())
+        self.collect_events()
+
+    def collect_events(self):
+        """self.events = the entry rows of the list, in the order shown (the two lines at the top are not entries)."""
+        self.events = [self.tree.topLevelItem(row) for row in range(len(self.heads), self.tree.topLevelItemCount())]
+
+    def add_event(self, event, row):
+        when = datetime.datetime.fromisoformat(event['when'])
+        drop = event.get('drop')
+        archive = event.get('archive')
+        top = QTreeWidgetItem([f'{when:%Y-%m-%d %H:%M}   [Zygote {event.get("zygote", "?")}]   {event.get("what", "")}'])
+        self.tree.insertTopLevelItem(row, top)
+        top.setData(0, Qt.UserRole + 1, bool(drop))
+        top.setData(0, Qt.UserRole + 2, bool(drop and (drop.get('kept') or drop.get('overridden'))))
+        top.setData(0, Qt.UserRole + 3, archive)                   # an archive line carries its record (zip, count, first, last)
+        if archive:
+            first, last = datetime.datetime.fromisoformat(archive['first']), datetime.datetime.fromisoformat(archive['last'])
+            top.setText(0, f'Archived: {first:%Y-%m-%d} to {last:%Y-%m-%d}, {archive["count"]} entries   (double-click to open)')
+            top.setForeground(0, QBrush(QColor(Theme.colors()['bright'])))
+            top.setToolTip(0, archive['zip'])
+        if drop:
+            top.setText(0, f'{when:%Y-%m-%d %H:%M}   {drop.get("zip", "")}:  {drop.get("before") or "?"} -> {drop.get("after") or "?"}   '
+                           f'changed {len(drop.get("changed", []))}, kept locked {len(drop.get("kept", []))}, replaced locked {len(drop.get("overridden", []))}   [Zygote {event.get("zygote", "?")}]')
+            for label, key in (('Changed', 'changed'), ('Kept because locked', 'kept'), ('Locked, replaced because you allowed it', 'overridden')):
+                names = drop.get(key, [])
+                if names:
+                    section = QTreeWidgetItem(top, [f'{label} ({len(names)})'])
+                    for name in names:
+                        QTreeWidgetItem(section, [name]).setData(0, Qt.UserRole, name)
+        return top
+
+    def entry_row(self, item):
+        """The top-level entry that holds this item (the item itself when it is one), or None."""
+        while item is not None and item.parent() is not None:
+            item = item.parent()
+        return item if item in self.events else None
+
+    def sync_archive_button(self):
+        """Archive works on the entries as they are on disk, so it waits while an archive is open in the list."""
+        self.archive_button.setEnabled(not self.opened and self.selected_entry() is not None)
+        self.archive_button.setToolTip('Put the opened archive back first (close this window)' if self.opened else 'The selected entry and every entry above it are packed into a ZIP')
+
+    def selected_entry(self):
+        rows = [self.entry_row(item) for item in self.tree.selectedItems()]
+        rows = [row for row in rows if row is not None]
+        return max(rows, key=self.events.index) if rows else None
+
+    def ask_archive(self, count, first, last):
+        """Archive asks first, naming how many entries and the dates. No is the default. Tests replace this."""
+        return QMessageBox.question(self, 'Zygote — archive', f'Pack {count} entries ({first:%Y-%m-%d} to {last:%Y-%m-%d}) into a ZIP and leave one line?\n'
+                                    'The ZIP stays in the notes folder; a double-click on the line opens them again.', QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes
+
+    def archive_selected(self):
+        chosen = self.selected_entry()
+        if chosen is None or self.opened:
+            return
+        last_index = self.events.index(chosen)
+        data = core.load_history(self.project)
+        packed = data['events'][:last_index + 1]
+        count = sum(core.entry_count(one) for one in packed)
+        if not self.ask_archive(count, datetime.datetime.fromisoformat(packed[0]['when']), datetime.datetime.fromisoformat(packed[-1]['when'])):
+            return
+        core.archive_history(self.project, last_index)
+        self.fill(core.load_history(self.project))
+        self.apply_filter()
+        self.sync_archive_button()
+
+    def ask_put_back(self):
+        """Closing with an archive open: put it back (one line again, nothing rewritten)? Yes is the default. Tests replace this."""
+        return QMessageBox.question(self, 'Zygote — archive', 'Put the opened archive back?', QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes) == QMessageBox.Yes
+
+    def reject(self):
+        """Closing (the button, Esc, the window's X). Yes keeps the archive as it is on disk. No leaves its entries in the history for good."""
+        if self.opened and not self.ask_put_back():
+            for record in self.opened:
+                core.unpack_archive(self.project, record['zip'])
+            self.opened = []
+        super().reject()
+
+    def apply_filter(self):
+        """Show the entries that pass the filter and hold the search words (in the entry line or in a file name); with a search, only the matching files are left under an entry."""
+        word = self.search.text().strip().lower()
+        mode = self.filter.currentText()
+        for top in self.events:
+            passes = mode == 'All' or (mode == 'Drops' and top.data(0, Qt.UserRole + 1)) or (mode == 'Locked' and top.data(0, Qt.UserRole + 2))
+            matches = self.show_matches(top, word)
+            top.setHidden(not (passes and matches))
+        for head in self.heads:
+            head.setHidden(bool(word) or mode != 'All')
+
+    def show_matches(self, top, word):
+        if not word:
+            self.reset(top)
+            return True
+        found = word in top.text(0).lower()
+        for index in range(top.childCount()):
+            section = top.child(index)
+            hits = 0
+            for number in range(section.childCount()):
+                one = section.child(number)
+                match = word in one.text(0).lower()
+                one.setHidden(not (match or found))
+                hits += match
+            section.setHidden(not (hits or found))
+            if hits:
+                section.setExpanded(True)
+                found = True
+        return found
+
+    def reset(self, top):
+        for index in range(top.childCount()):
+            top.child(index).setHidden(False)
+            for number in range(top.child(index).childCount()):
+                top.child(index).child(number).setHidden(False)
+
+    def open_item(self, item):
+        archive = item.data(0, Qt.UserRole + 3)
+        if archive:
+            self.open_archive(item, archive)
+            return
+        rel = item.data(0, Qt.UserRole)
+        if rel and (self.project / rel).exists():
+            core.open_file(self.project / rel)
+
+    def open_archive(self, item, archive):
+        """The archive line is replaced in the list by the entries inside it (the disk is not changed: closing asks whether they go back)."""
+        row = self.tree.indexOfTopLevelItem(item)
+        self.tree.takeTopLevelItem(row)
+        for number, event in enumerate(core.read_archive(self.project, archive['zip'])):
+            self.add_event(event, row + number)
+        self.opened.append(archive)
+        self.collect_events()
+        self.apply_filter()
+        self.sync_archive_button()
+
+    def all_text(self):
+        """Every line of the list, sections and files included (for tests and for copying all)."""
+        lines = []
+        for row in range(self.tree.topLevelItemCount()):
+            self.add_lines(lines, self.tree.topLevelItem(row), 0)
+        return '\n'.join(lines)
+
+    def add_lines(self, lines, item, depth):
+        lines.append('  ' * depth + item.text(0))
+        for index in range(item.childCount()):
+            self.add_lines(lines, item.child(index), depth + 1)

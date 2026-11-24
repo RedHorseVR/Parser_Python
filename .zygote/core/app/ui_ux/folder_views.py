@@ -10,6 +10,7 @@ from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QListView, QMenu, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTreeView
 
 from ui_ux.lazy_model import PATHS_FORMAT
+from ui_ux.models import HELD_ROLE
 from ui_ux.recycle import SLOTS_FORMAT
 
 
@@ -83,7 +84,16 @@ class UpButton(QPushButton):
         event.acceptProposedAction()
 
 
-class FullNameDelegate(QStyledItemDelegate):
+class HeldDelegate(QStyledItemDelegate):
+    """A locked item has its name underlined (the lock mark in front of it comes from the model). The underline is drawn here, not set by the model's font, so the panel's zoom still decides the size."""
+
+    def initStyleOption(self, option, index):
+        super().initStyleOption(option, index)
+        if index.data(HELD_ROLE):
+            option.font.setUnderline(True)
+
+
+class FullNameDelegate(HeldDelegate):
     """The icon view cuts a long name with … . The item that is selected shows its whole name instead, wrapped inside its own highlight (the way Explorer does)."""
 
     def paint(self, painter, option, index):
@@ -125,6 +135,10 @@ class FolderIcons(BinDrops, QListView):
 class FolderDetails(BinDrops, QTreeView):
     refused = Signal(str)
     restoreDropped = Signal(list)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setItemDelegate(HeldDelegate(self))
 
 
 class PathBar(QLabel):

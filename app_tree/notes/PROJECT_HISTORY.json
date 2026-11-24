@@ -1,6 +1,6 @@
 {
   "started_with": "Z_2.17.2",
-  "last_upgraded_to": "Z_2.19.16",
+  "last_upgraded_to": "Z_2.19.35",
   "events": [
     {
       "when": "2026-11-21T13:46:08-06:00",
@@ -26,6 +26,41 @@
       "when": "2026-11-22T03:33:52-06:00",
       "zygote": "Z_2.19.16",
       "what": "Opened with Zygote Z_2.19.16 (before: Z_2.19.13; forward)"
+    },
+    {
+      "when": "2026-11-22T15:02:38-06:00",
+      "zygote": "Z_2.19.17",
+      "what": "Opened with Zygote Z_2.19.17 (before: Z_2.19.16; forward)"
+    },
+    {
+      "when": "2026-11-22T17:56:11-06:00",
+      "zygote": "Z_2.19.19",
+      "what": "Opened with Zygote Z_2.19.19 (before: Z_2.19.17; forward)"
+    },
+    {
+      "when": "2026-11-22T19:27:51-06:00",
+      "zygote": "Z_2.19.20",
+      "what": "Opened with Zygote Z_2.19.20 (before: Z_2.19.19; forward)"
+    },
+    {
+      "when": "2026-11-23T02:07:39-06:00",
+      "zygote": "Z_2.19.25",
+      "what": "Opened with Zygote Z_2.19.25 (before: Z_2.19.20; forward)"
+    },
+    {
+      "when": "2026-11-23T14:18:03-06:00",
+      "zygote": "Z_2.19.29",
+      "what": "Opened with Zygote Z_2.19.29 (before: Z_2.19.25; forward)"
+    },
+    {
+      "when": "2026-11-23T15:54:27-06:00",
+      "zygote": "Z_2.19.31",
+      "what": "Opened with Zygote Z_2.19.31 (before: Z_2.19.29; forward)"
+    },
+    {
+      "when": "2026-11-24T00:22:39-06:00",
+      "zygote": "Z_2.19.35",
+      "what": "Opened with Zygote Z_2.19.35 (before: Z_2.19.31; forward)"
     }
   ]
 }

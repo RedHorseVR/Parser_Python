@@ -31,15 +31,13 @@ def read_index(index_file):
         if version >= 3 and flags & 0x4000:
             at += 2
         if version == 4:
-            strip, shift = 0, 0
-            while True:                                           # the number of bytes cut from the end of the previous path (a varint)
+            byte = data[at]                                       # the number of bytes cut from the end of the previous path: Git's own offset varint (most significant first)
+            at += 1
+            strip = byte & 0x7f
+            while byte & 0x80:
                 byte = data[at]
                 at += 1
-                strip |= (byte & 0x7f) << shift
-                if not byte & 0x80:
-                    break
-                shift += 7
-                strip += 1 << shift
+                strip = ((strip + 1) << 7) + (byte & 0x7f)
             end = data.index(b'\0', at)
             name = previous[:len(previous) - strip] + data[at:end]
             at = end + 1
@@ -93,4 +91,15 @@ def states(project):
             key = '/'.join(parts[:at])
             if result.get(key) != 'bad':
                 result[key] = 'bad' if state == 'bad' else result.get(key, 'ok')
+    return result
+
+
+def folded(marks):
+    """The same marks by lower-case name ('bad' wins when two names differ only in letter case). Windows is blind to letter case: a file the disk calls DOS.key and the Git
+    index calls dos.key (the case it was first added with) is the same file, and Git itself says it is clean."""
+    result = {}
+    for name, state in marks.items():
+        key = name.casefold()
+        if result.get(key) != 'bad':
+            result[key] = state
     return result

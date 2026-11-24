@@ -5,6 +5,7 @@ disk, so a click, a drag, a selection or a scroll is never held up by a slow fol
 It stands in for QFileSystemModel: filePath, isDir, index(path), setRootPath, setFilter, sort, directoryLoaded. A folder is watched while it is
 loaded (one QFileSystemWatcher): when it changes it is read again and its rows are brought up to date."""
 import functools
+import os
 import tempfile
 from pathlib import Path
 
@@ -12,8 +13,8 @@ from PySide6.QtCore import QAbstractItemModel, QDateTime, QDir, QFileInfo, QFile
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QFileIconProvider
 
-from functional import core
-from ui_ux.models import MarkedEngine, PageIcon, Tint
+from functional import core, git_marks
+from ui_ux.models import HELD_ROLE, MarkedEngine, PageIcon, Tint
 
 PATHS_FORMAT = 'application/x-zygote-paths'                    # what a drag started in the folder view carries: only Zygote's own views make it
 WATCH_LIMIT = 150
@@ -33,6 +34,7 @@ class Node:
 
 
 class LazyModel(Tint, QAbstractItemModel):
+    CASE_BLIND = os.name == 'nt'                               # Windows: DOS.key and dos.key are one file, so a mark is found by lower-case name too
     directoryLoaded = Signal(str)
     binDropped = Signal(list)                                  # paths dropped on the recycle bin row
     moveDropped = Signal(list, str)                            # (paths, folder): green items dropped on a folder; the window moves them
@@ -55,6 +57,7 @@ class LazyModel(Tint, QAbstractItemModel):
         self.type_icons = {}                                   # file type icons without Windows' own overlays, by suffix
         self.marks = None                                      # {relative path: 'ok' | 'bad'} from the Git index (functional.git_marks); None until read
         self.marked = {}                                       # the icons with a mark drawn, by (path, state)
+        self.marks_folded = {}                                 # the same marks by lower-case name (Windows does not tell DOS.key from dos.key)
         self.bin_icon = None                                   # the recycle bin picture now shown (empty or full: the window says which)
         self.bin_pictures = (None, None)                       # (empty, full)
         self.root_path = ''
@@ -409,10 +412,14 @@ class LazyModel(Tint, QAbstractItemModel):
                 return 'Recycle bin: drop the items you work on here to throw them away. Double-click to open it.'
             return None
         if column == 0:
-            if role in (Qt.DisplayRole, Qt.EditRole):
+            if role == Qt.EditRole:
                 return node.name
+            if role == Qt.DisplayRole:
+                return self.shown_name(node.path, node.name)
+            if role == HELD_ROLE:
+                return self.is_held(node.path)
             if role == Qt.ToolTipRole:
-                return node.path
+                return node.name + ('\nLocked' if self.is_held(node.path) else '')     # the whole name only (the lock mark takes room from the name); no path: the workbench says where we are
             if role == Qt.DecorationRole:
                 if node.icon is None:
                     node.icon = self.file_icon(node.path)
@@ -463,6 +470,7 @@ class LazyModel(Tint, QAbstractItemModel):
         """The Git state of the files, as read by the marks scout: the icons are drawn again with their marks."""
         self.layoutAboutToBeChanged.emit()
         self.marks = marks
+        self.marks_folded = git_marks.folded(marks) if marks and self.CASE_BLIND else {}
         self.marked = {}
         self.layoutChanged.emit()
 
@@ -472,6 +480,8 @@ class LazyModel(Tint, QAbstractItemModel):
             return icon
         rel = core.project_relative(self.project_root, path)
         state = None if rel is None else self.marks.get(rel)
+        if state is None and rel is not None and self.CASE_BLIND:
+            state = self.marks_folded.get(rel.casefold())
         if state is None:
             return icon
         key = (path, state)

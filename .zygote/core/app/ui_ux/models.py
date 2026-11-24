@@ -4,7 +4,7 @@ credentials, logs, env) with a blue folder and blue name, so "protected" looks t
 Only the yellow of a folder icon is recolored; the status overlays that TortoiseGit puts on icons keep their own colors."""
 from pathlib import Path
 
-from PySide6.QtCore import QPointF, QSortFilterProxyModel, Qt
+from PySide6.QtCore import QPointF, QSize, QSortFilterProxyModel, Qt
 from PySide6.QtGui import QBrush, QColor, QIcon, QIconEngine, QImage, QPainter, QPainterPath, QPen, QPixmap, QPolygonF, QRegion
 from PySide6.QtWidgets import QFileSystemModel
 
@@ -61,10 +61,14 @@ class PageIcon:
 
 
 class MarkedEngine(QIconEngine):
-    """An icon with Zygote's own small status mark at its lower left: a dark green check (nothing changed since the last commit) or a red exclamation
-    point (changed). Each has a white outline so it shows on the green folders too. Drawn for every size that is asked for; no file is written."""
-    SHARE = 0.30                                               # the mark's side as a share of the icon's
+    """An icon with Zygote's own small status mark: a dark green check (nothing changed since the last commit) or a red exclamation point (changed). Each has a white
+    outline so it shows on dark and on light. The mark is ONE size for every icon (a share of the canvas, not of the picture, so a wide picture gets no bigger mark) and hangs
+    at the LEFT, mostly on the background: the picture is drawn a little smaller, to the right of it. Icons too small for that (under HANG_FROM pixels) keep the mark over the
+    picture's lower left. Drawn for every size that is asked for; no file is written."""
+    SHARE = 0.36                                               # the mark's side as a share of the canvas
     MINIMUM = 11
+    HANG = 0.55                                                # share of the mark's width that hangs beside the picture
+    HANG_FROM = 24                                             # canvas side from which the picture makes room for the mark
 
     def __init__(self, source, state):
         super().__init__()
@@ -72,21 +76,24 @@ class MarkedEngine(QIconEngine):
         self.state = state
 
     def pixmap(self, size, mode, state):
-        """The picture is first put on a canvas of exactly the size asked for (whatever size the source answered), then the mark is drawn LAST, on top, inside the
-        part of the canvas the picture really covers: at the lower left of that part, so it is never cut off by the edge of the canvas and never underneath."""
+        """The picture is put on a canvas of exactly the size asked for (whatever size the source answered), at the right of the room kept for the mark; the mark is drawn LAST,
+        at the left edge, its bottom on the bottom of the part of the canvas the picture covers."""
         side = max(1, size.width()), max(1, size.height())
         base = QPixmap(*side)
         base.fill(Qt.transparent)
         painter = QPainter(base)
         painter.setRenderHint(QPainter.SmoothPixmapTransform)
+        edge = min(side)
+        box = max(self.MINIMUM, int(edge * self.SHARE))
+        room = int(box * self.HANG) if edge >= self.HANG_FROM else 0
+        area = QSize(side[0] - room, side[1])
         picture = self.trimmed(self.source.pixmap(size, mode, state))
         if not picture.isNull():
-            scaled = picture if picture.size() == base.size() else picture.scaled(base.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            painter.drawPixmap((base.width() - scaled.width()) // 2, (base.height() - scaled.height()) // 2, scaled)
+            scaled = picture if picture.size() == area else picture.scaled(area, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            painter.drawPixmap(room + (area.width() - scaled.width()) // 2, (area.height() - scaled.height()) // 2, scaled)
         covered = self.covered(base)
         painter.setRenderHint(QPainter.Antialiasing)
-        box = max(self.MINIMUM, int(min(covered.width(), covered.height()) * self.SHARE))
-        painter.translate(covered.left() + 1, covered.bottom() - box)
+        painter.translate(0 if room else covered.left() + 1, covered.bottom() - box)
         if self.state == 'bad':
             MarkDrawing.exclamation(painter, box)
         else:
@@ -185,9 +192,27 @@ class FolderTint:
         return QIcon(TintedEngine(icon, hue))
 
 
+HELD_ROLE = Qt.UserRole + 41                                   # True for a locked item (or one inside a locked folder): the delegates underline its name
+LOCK_MARK = '\U0001F512 '                                      # the small lock in front of a locked name
+
+
 class Tint:
     """What the models share: the blue of the sacred folders and the green of the items the person works on (one code path)."""
     project_root = None
+    held = ()                                                  # the project's locked entries (project-relative), set by the window
+
+    def is_held(self, path):
+        """True for a locked file or folder, and for what is inside a locked folder."""
+        return bool(self.held) and self.project_root is not None and bool(core.held_covering(self.held, core.project_relative(self.project_root, path)))
+
+    def shown_name(self, path, name):
+        return LOCK_MARK + name if self.is_held(path) else name
+
+    def set_held(self, held):
+        """The locked entries changed: the names are drawn again."""
+        self.held = tuple(held)
+        self.layoutAboutToBeChanged.emit()
+        self.layoutChanged.emit()
 
     def is_sacred_path(self, path, is_dir):
         if self.project_root is None or not is_dir:

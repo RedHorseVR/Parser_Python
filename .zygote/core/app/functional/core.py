@@ -12,6 +12,7 @@ import os
 import random
 import ctypes
 import re
+import filecmp
 import shutil
 import subprocess
 import sys
@@ -61,6 +62,14 @@ class ZygoteError(Exception):
     pass
 
 
+class LockedFiles(ZygoteError):
+    """An update could not start because files it replaces are in use or read-only; `.files` names them (the message says what to do)."""
+
+    def __init__(self, message, files):
+        super().__init__(message)
+        self.files = list(files)
+
+
 def under(rel, folder):
     """True when the relative path `rel` is `folder` itself or lies inside it (case-insensitive, like Windows)."""
     rel, folder = rel.lower(), folder.lower()
@@ -96,20 +105,61 @@ def now():
     return datetime.datetime.now().astimezone()
 
 
-# ---- the project's own record (.zygote\user\zygote.json: the name, and when the version last changed) ---------------------
+# ---- the project's own record: TWO files. What belongs to the PROJECT travels with it (.zygote\config\project.json: name, icon, run settings, entry point, look, deploy settings,
+# the agents' saved prompts). What belongs to THIS COMPUTER stays out of every ZIP (.zygote\user\zygote.json: window place, zoom, layout, shells, console choice, git program...).
+# One rule: files in user never travel, files in config always do.
+PROJECT_KEYS = ('name', 'icon', 'run', 'entry', 'theme', 'outer_color', 'deploy', 'ai_prompts', 'license')
+
+
 def state_path(project):
+    """The computer's own record of the project (never in a ZIP)."""
     return Path(project) / DOT / 'user' / 'zygote.json'
 
 
+def project_state_path(project):
+    """The record that travels with the project (in every ZIP)."""
+    return Path(project) / DOT / 'config' / 'project.json'
+
+
+def read_record(path):
+    if not path.is_file():
+        return {}
+    try:
+        found = json.loads(path.read_text(encoding='utf-8'))
+    except ValueError as error:
+        raise ZygoteError(f'{path} is not readable ({error}). Fix or remove it.') from error
+    if not isinstance(found, dict):
+        raise ZygoteError(f'{path} must hold one JSON object.')
+    return found
+
+
 def load_state(project):
-    path = state_path(project)
-    return json.loads(path.read_text(encoding='utf-8')) if path.is_file() else {}
+    """Both records as one. An older project still keeps its project keys in the computer's file: they are read from there until the next save moves them (the project's own file wins)."""
+    state = read_record(state_path(project))
+    state.update(read_record(project_state_path(project)))
+    return state
 
 
 def save_state(project, state):
-    path = state_path(project)
+    """The project's keys go to the file that travels, the rest to the computer's file; a project key left over in the computer's file is removed (moved, not copied)."""
+    mine = {key: value for key, value in state.items() if key in PROJECT_KEYS}
+    ours = {key: value for key, value in state.items() if key not in PROJECT_KEYS}
+    path, travelling = state_path(project), project_state_path(project)
+    if mine or travelling.is_file():
+        travelling.parent.mkdir(parents=True, exist_ok=True)
+        travelling.write_text(json.dumps(mine, indent=2) + '\n', encoding='utf-8')
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, indent=2) + '\n', encoding='utf-8')
+    path.write_text(json.dumps(ours, indent=2) + '\n', encoding='utf-8')
+
+
+def run_settings_missing(project):
+    """The sentence to say when a project has code in app\\ and no run settings saved at all (a project rebuilt from a copy that lost them), else ''. Zygote itself is exempt."""
+    project = Path(project)
+    state = load_state(project)
+    if clean_path(project) == ZYGOTE_ROOT or state.get('run') or state.get('entry') or not any(project.glob('app/*.py')):
+        return ''
+    return ('Run settings missing: this project has code in app\\ but no runner or entry point is saved. Open Project > Settings… > Run and choose them '
+            '(they are kept in .zygote\\config\\project.json and travel with the project).')
 
 
 def settings_path():
@@ -353,15 +403,29 @@ def check_drop(project, plan):
     name = version_name(new)
     if any(same_name(name, known) for known in mine):
         if old and version_direction(old, new) == 'back':
-            return {'verdict': 'back', 'text': f'This ZIP is {new} but the project is at {old}: this goes BACK to an older version. Unpack it over the project anyway? '
+            return {'verdict': 'back', 'text': f'This ZIP is OLDER.\n\nZIP: {new}\nPROJECT NOW: {old}\n\nUnpacking it goes BACK to the older version. Unpack it over the project anyway? '
                                                    '(Project > Revert project… can undo it afterwards.)'}
         return {'verdict': 'ok', 'text': ''}
     if old is None and not any(known for known in mine if known != Path(project).name):
         return {'verdict': 'unknown', 'text': f'This project has no version yet, and {new} does not carry its name. Unpack it over the project anyway?'}
-    return {'verdict': 'refuse', 'text': f'{heading}\n\nThe ZIP is {new}; the project is {old or Path(project).name} (it goes by: {", ".join(sorted(set(mine)))}). '
-            'It is another project\'s build, and unpacking it would mix the two projects. Nothing was unpacked.\n\n'
-            'You can open it as a new project of its own with the button below, or, if this project really was renamed, rename it first in Settings > Project settings…, then drop the ZIP again.',
-            'new_project': True}
+    return {'verdict': 'refuse', 'wrong_name': name, 'right': find_right_project(project, plan),
+            'text': f'This is the wrong project.\n\nThe ZIP is {new}; the project open here is {old or Path(project).name} (it goes by: {", ".join(sorted(set(mine)))}). '
+                    'Nothing was unpacked and nothing was changed.'}
+
+
+def find_right_project(project, plan):
+    """The folder of the project a refused ZIP belongs to, looked for BESIDE the open project (in the same parent folder): a folder named like the ZIP's project, or one
+    with a .zygote folder whose project goes by that name. None when there is none. Nothing outside that one folder is searched."""
+    name = version_name(plan['version'])
+    here = clean_path(project)
+    if not name or not here.parent.is_dir():
+        return None
+    for folder in sorted(here.parent.iterdir(), key=lambda one: one.name.lower()):
+        if folder == here or not folder.is_dir() or not (folder / DOT).is_dir():
+            continue
+        if same_name(folder.name, name) or any(same_name(known, name) for known in project_names(folder)):
+            return folder
+    return None
 
 
 def new_project_name(plan):
@@ -483,11 +547,152 @@ def list_snapshots(project):
     return [read_snapshot(p) for p in found]
 
 
-def install_zip(zip_path, project):
+class HeldFiles(ZygoteError):
+    """A ZIP carries files the person locked, and Zygote cannot tell by itself that the copy is a stale one. `files` = [{'rel', 'tracked'}]: tracked False = no fingerprint of the last received copy."""
+
+    def __init__(self, text, files):
+        super().__init__(text)
+        self.files = files
+
+
+# ---- Locks: files and folders the person works on can be locked so a dropped ZIP does not replace them. The lock list and the fingerprints of what the drops delivered are
+# kept in THIS computer's record (.zygote\user\zygote.json: `holds`, `received`), never in a ZIP.
+HOLDS_KEY, RECEIVED_KEY = 'holds', 'received'
+
+
+def held_list(project):
+    return list(load_state(project).get(HOLDS_KEY, []))
+
+
+def held_covering(held, rel):
+    """The locked entry (a file, or a folder above it) that covers this project-relative path, else ''."""
+    for entry in held:
+        if rel == entry or rel.startswith(entry + '/'):
+            return entry
+    return ''
+
+
+def can_hold(project, path):
+    """Only what the person works on can be locked (green files and folders); never the project, app_tree itself, or anything of Zygote's own structure (yellow ones included)."""
+    return bool(project_relative(project, path)) and is_working(project, path) and not is_yellow(project, path) and not is_app_tree(project, path)
+
+
+def hold(project, path):
+    """Lock a file or folder. Returns its project-relative path."""
+    if not can_hold(project, path):
+        raise ZygoteError(f'{Path(path).name} cannot be locked: only the files and folders you work on can (not Zygote\'s own, nor the project or app_tree themselves).')
+    rel = project_relative(project, path)
+    state = load_state(project)
+    held = list(state.get(HOLDS_KEY, []))
+    if rel not in held:
+        held.append(rel)
+    state[HOLDS_KEY] = sorted(held)
+    save_state(project, state)
+    return rel
+
+
+def release(project, path):
+    """Unlock what was locked itself. An item that is only inside a locked folder is unlocked by unlocking that folder (the error says which)."""
+    rel = project_relative(project, path)
+    state = load_state(project)
+    held = list(state.get(HOLDS_KEY, []))
+    if rel not in held:
+        above = held_covering(held, rel)
+        raise ZygoteError(f'{Path(path).name} is locked by the folder {above}: unlock that folder.' if above else f'{Path(path).name} is not locked.')
+    held.remove(rel)
+    state[HOLDS_KEY] = held
+    save_state(project, state)
+    return rel
+
+
+def zip_fingerprints(zip_path, plan):
+    """{relative path: 'crc-size'} of the files of a ZIP, read from its directory (no file is read). It only has to tell two copies of one file apart."""
+    members = dict(plan['write'])
+    with zipfile.ZipFile(zip_path) as zf:
+        return {members[info.filename]: f'{info.CRC:08x}-{info.file_size}' for info in zf.infolist() if info.filename in members}
+
+
+def forget_received(project, rels):
+    state = load_state(project)
+    got = dict(state.get(RECEIVED_KEY, {}))
+    for rel in rels:
+        got.pop(rel, None)
+    state[RECEIVED_KEY] = got
+    save_state(project, state)
+
+
+def judge_holds(project, plan, zip_path):
+    """What the drop may do with the files the person locked. Returns (kept, asked, writable):
+    kept = locked files the ZIP carries as the stale copy it delivered before (not copied, nothing asked); asked = [{'rel', 'tracked'}] a locked file whose copy differs
+    from the last one received, or with no fingerprint yet; writable = the plan's write list without the kept and the asked ones. A file that is not there yet,
+    or whose bytes already match, is not touched by the lock."""
+    state = load_state(project)
+    held, got = state.get(HOLDS_KEY, []), state.get(RECEIVED_KEY, {})
+    if not held:
+        return [], [], list(plan['write'])
+    fingerprints = zip_fingerprints(zip_path, plan)
+    kept, asked, writable = [], [], []
+    with zipfile.ZipFile(zip_path) as zf:
+        for member, rel in plan['write']:
+            target = Path(project).joinpath(*rel.split('/'))
+            if not held_covering(held, rel) or not target.is_file():
+                writable.append((member, rel))
+            elif zf.read(member) == target.read_bytes():
+                continue                                            # the same bytes: nothing to protect, nothing to write
+            elif got.get(rel) == fingerprints[rel]:
+                kept.append(rel)
+            else:
+                asked.append({'rel': rel, 'tracked': rel in got})
+    return kept, asked, writable
+
+
+CORE_REL = '.zygote/core'
+
+
+def version_key(text):
+    """The numbers of a version text as a tuple (Z_2.19.33 -> (2, 19, 33)), or None when it has none."""
+    numbers = re.findall(r'\d+', text or '')
+    return tuple(int(number) for number in numbers) if numbers else None
+
+
+def guard_core(project, plan, zip_path):
+    """A dropped ZIP never rolls the project's core back. Both versions come from the VERSION.txt inside each core (.zygote\\core). A ZIP core that is the same or newer goes in as
+    before; one that is older, or whose version is missing or unreadable, is NOT written: the project keeps its own core. Returns (plan without those core files, note) where note is
+    None (nothing to say) or {'zip': text or None, 'project': text, 'reason': 'older' | 'unreadable'}."""
+    members = [(member, rel) for member, rel in plan['write'] if under(rel, CORE_REL)]
+    mine = core_version(project)
+    if not members or mine is None:
+        return plan, None                                                    # no core in the ZIP, or the project has none yet: nothing to guard
+    theirs = None
+    for member, rel in members:
+        if rel == CORE_REL + '/VERSION.txt':
+            with zipfile.ZipFile(zip_path) as zf:
+                theirs = zf.read(member).decode('utf-8', 'replace').strip()
+    ours, other = version_key(mine), version_key(theirs)
+    if other is not None and ours is not None and other >= ours:
+        return plan, None
+    reason = 'older' if other is not None and ours is not None else 'unreadable'
+    kept = [(member, rel) for member, rel in plan['write'] if not under(rel, CORE_REL)]
+    return dict(plan, write=kept, skipped=plan['skipped'] + [rel for _member, rel in members]), {'zip': theirs, 'project': mine, 'reason': reason}
+
+
+def core_guard_sentence(note):
+    """The one sentence the toast, the Log and the history all say when a drop's core was not taken."""
+    if note['reason'] == 'older':
+        return (f'This ZIP carries an old core ({note["zip"]}). Your project\'s core ({note["project"]}) was kept. '
+                'Make ZIP and hand it back, so the next ZIP carries the new core.')
+    return (f'This ZIP carries a core whose version could not be read ({note["zip"] or "no VERSION.txt"}). Your project\'s core ({note["project"]}) was kept. '
+            'Make ZIP and hand it back, so the next ZIP carries a core that can be read.')
+
+
+def install_zip(zip_path, project, allow=None):
     """Unpack a build ZIP over the project, replacing files in place. Sacred folders are never touched.
 
     Before the first file is written, every file about to be replaced is saved in a new snapshot in zip\\undo\\ (every drop
-    keeps its own; none is deleted). revert_project() reads them back."""
+    keeps its own; none is deleted). revert_project() reads them back.
+
+    Locked files are not replaced. `allow` = the locked files the person ticked to be replaced this once (None = nobody was asked yet: a locked file the ZIP
+    really changes, or one with no fingerprint, raises HeldFiles so the caller can ask)."""
     project = Path(project)
     if not project.is_dir():
         raise ZygoteError(f'Project folder not found: {project}')
@@ -495,11 +700,22 @@ def install_zip(zip_path, project):
     judged = check_drop(project, plan)
     if judged['verdict'] == 'refuse':
         raise ZygoteError(judged['text'])                # the guard sits here too, so no caller can unpack another project's build
+    plan, core_note = guard_core(project, plan, zip_path)          # the core only moves forward: an older one in the ZIP is not written
+    kept, asked, writable = judge_holds(project, plan, zip_path)
+    if asked and allow is None:
+        raise HeldFiles('These locked files are in the ZIP with a copy that is not the stale one (or Zygote has no fingerprint of the last copy):\n  ' +
+                        '\n  '.join(one['rel'] for one in asked), asked)
+    allowed = set(allow or ())
+    overridden = [one['rel'] for one in asked if one['rel'] in allowed]
+    kept = kept + [one['rel'] for one in asked if one['rel'] not in allowed]
+    fingerprints = zip_fingerprints(zip_path, plan)
+    everything = plan['write']
+    plan = dict(plan, write=writable + [(m, r) for m, r in everything if r in overridden])
     locked = locked_files(project, plan)
     if locked:
-        raise ZygoteError('These files are in use (or read-only) and cannot be replaced:\n  ' + '\n  '.join(locked) +
+        raise LockedFiles('These files are in use (or read-only) and cannot be replaced:\n  ' + '\n  '.join(locked) +
                           '\nClose whatever is using them (if it is Zygote itself, close Zygote and start it again), then drop the ZIP again.'
-                          '\nNothing was changed.')
+                          '\nNothing was changed.', locked)
     before = read_version(project)
     snapshot = write_snapshot(project, plan, zip_path, before)
     try:
@@ -513,9 +729,13 @@ def install_zip(zip_path, project):
         revert_project(project, snapshot)
         raise ZygoteError(f'Windows refused to write {error.filename or "a file"} ({error.strerror or error}). '
                           'Everything was put back as it was. Close whatever uses that file, then drop the ZIP again.') from error
+    state = load_state(project)                          # what this drop delivered, for the next one (all files: a file locked later already has its fingerprint)
+    state[RECEIVED_KEY] = dict(state.get(RECEIVED_KEY, {}), **fingerprints)
+    save_state(project, state)
     own_code = own_code_changed(project, [rel for _member, rel in plan['write']])
     return {'before': before, 'after': read_version(project), 'written': len(plan['write']), 'skipped': plan['skipped'],
-            'restart_needed': own_code, 'snapshot': snapshot}
+            'restart_needed': own_code, 'snapshot': snapshot, 'files': [rel for _member, rel in plan['write']], 'kept': kept, 'overridden': overridden,
+            'core_kept': core_note}
 
 
 def remove_empty_parents(project, target):
@@ -559,6 +779,7 @@ def revert_project(project, snapshot_name):
                 removed += 1
             remove_empty_parents(project, target)
         touched += manifest['replaced'] + manifest['created']
+    forget_received(project, touched)                  # what those drops delivered is no longer what the project holds: a locked copy is asked about again
     for manifest in wanted:
         (snapshot_dir(project) / manifest['name']).unlink()
     if snapshot_dir(project).is_dir() and not any(snapshot_dir(project).iterdir()):
@@ -1067,7 +1288,7 @@ def default_program(extension):
 
 def program_for(path):
     """The program that opens this file: the person's choice, else Zygote's default for the type, else None (Windows' own)."""
-    extension = file_extension(path)
+    extension = file_extension(path) or '.txt'                 # a file with no file type (LICENSE) is text: it opens with the program chosen for .txt
     chosen = associations().get(extension)
     if chosen == WINDOWS_OWN:
         return None
@@ -1117,6 +1338,111 @@ def remove_association(extension):
     mapping = associations()
     mapping.pop(extension.lower(), None)
     save_associations(mapping)
+
+
+# ---- Command line tools (Tools menu): a name, a command with <file> and <folder>, and how it runs ---------------------------------------------------------------
+DANGEROUS_COMMANDS = ('del', 'erase', 'rd', 'rmdir', 'move', 'ren', 'rename')       # a tool that starts with one of these may never touch a protected item
+COMMAND_KEYS = ('name', 'command', 'console', 'keep_open')
+
+
+def check_command_tool(tool):
+    """One tool as it is saved: a name (it becomes a menu entry), a command, and the two ticks. A blank name or command is refused."""
+    name, command = str(tool.get('name', '')).strip(), str(tool.get('command', '')).strip()
+    if not name:
+        raise ZygoteError('A command line tool needs a menu name.')
+    if not command:
+        raise ZygoteError(f'The tool "{name}" needs a command.')
+    return {'name': name, 'command': command, 'console': bool(tool.get('console', True)), 'keep_open': bool(tool.get('keep_open', True))}
+
+
+def command_tool_defaults():
+    try:
+        data = json.loads(Path(TOOLS_DEFAULTS).read_text(encoding='utf-8'))
+        return [check_command_tool(one) for one in data['commands']]
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise ZygoteError(f'The tools defaults file cannot be read ({TOOLS_DEFAULTS}): {error}') from error
+
+
+def command_tools():
+    """The command line tools of this computer: what the person saved, else the starters (tree, dir) from the defaults file."""
+    saved = load_settings().get('command_tools')
+    return command_tool_defaults() if saved is None else [check_command_tool(one) for one in saved]
+
+
+def save_command_tools(tools):
+    checked = [check_command_tool(one) for one in tools]
+    names = [one['name'].lower() for one in checked]
+    for name in names:
+        if names.count(name) > 1:
+            raise ZygoteError(f'Two tools are called "{name}": every menu name is used once.')
+    save_setting('command_tools', checked)
+    return checked
+
+
+def quoted_path(project, path):
+    """A path as the command sees it: relative to the project root ('.' for the root itself), in the system's own slashes, in double quotes."""
+    rel = project_relative(project, path)
+    if rel is None:
+        raise ZygoteError(f'{path} is outside the project: a tool works inside the project only.')
+    text = rel.replace('/', os.sep) if rel else '.'
+    return f'"{text}"' if re.search(r'[\s&()^%!;,=]', text) else text          # quotes only where the command line needs them (a plain relative path is safest bare)
+
+
+def command_tool_line(project, command, file='', folder=''):
+    """The command with <file> and <folder> filled in. <file> with no selected file: "select a file first". <folder> with no folder in view: the project root."""
+    line = command
+    if '<file>' in line:
+        if not file:
+            raise ZygoteError('Select a file first (this tool works on the selected file).')
+        line = line.replace('<file>', quoted_path(project, file))
+    if '<folder>' in line:
+        line = line.replace('<folder>', quoted_path(project, folder or project))
+    return line
+
+
+def command_danger(project, line):
+    """The warning text when the finished command line would delete, move or rename a protected item (the project itself, .zygote, .git, zip, START_HERE.md,
+    the launcher, the app_tree folder, anything outside the project), else ''. Only the command's name is looked at: del, erase, rd, rmdir, move, ren, rename."""
+    import shlex
+    try:
+        words = shlex.split(line, posix=False)
+    except ValueError:
+        words = line.split()
+    if not words or Path(words[0].strip('"')).stem.lower() not in DANGEROUS_COMMANDS:
+        return ''
+    root = clean_path(project)
+    for word in words[1:]:
+        word = word.strip('"')
+        if not word or word.startswith('/') and len(word) <= 3 or word.startswith('-'):
+            continue                                                  # a switch such as /s or /q
+        target = Path(os.path.normpath(root / word.replace('\\', '/')))
+        if any(mark in word for mark in '*?'):
+            target = target.parent                                    # a wildcard acts on what is in that folder
+        rel = project_relative(root, target)
+        if rel is None:
+            return f'{words[0]} was stopped: {word} is outside the project.'
+        if rel == '' and target != root / word.replace('\\', '/'):
+            return f'{words[0]} was stopped: {word} at the project root could reach protected items (START_HERE.md, the launcher). Name the files, or work in a folder.'
+        if rel == '' or not can_trash(root, target):
+            return f'{words[0]} was stopped: {word} is protected (the project itself, .zygote, .git, zip, START_HERE.md, the launcher and the app tree folder cannot be deleted, moved or renamed).'
+    return ''
+
+
+def open_external_tool(line, folder, keep_open):
+    """Run one command line in an external console window (one process, from a menu press). Windows: cmd.exe /k (stays open) or /c (closes), the line passed
+    whole so its quotes arrive as typed. Other systems: the known terminal, which waits for Enter. Returns the command text, None when there is no terminal."""
+    if hasattr(subprocess, 'CREATE_NEW_CONSOLE'):
+        text = f'cmd.exe {"/k" if keep_open else "/c"} {line}'
+        subprocess.Popen(text, cwd=str(folder), creationflags=subprocess.CREATE_NEW_CONSOLE)
+        return text
+    return open_external_console(['/bin/sh', '-c', line], folder)
+
+
+def command_shell_words(line, keep_open=True):
+    """The program and words that run one command line: Windows cmd.exe /c, other systems sh -c."""
+    if hasattr(subprocess, 'CREATE_NEW_CONSOLE'):
+        return ['cmd.exe', '/c', line]
+    return ['/bin/sh', '-c', line]
 
 
 def run_program(program, path):
@@ -1496,9 +1822,27 @@ def update_core(project):
     return sum(1 for item in old.rglob('*') if item.is_file())
 
 
+def remember_update(project, what):
+    """The last real update of the project's core, kept as data in the computer's record (never zipped): when, and what it did."""
+    state = load_state(project)
+    state['last_update'] = {'when': now().isoformat(timespec='seconds'), 'what': what}
+    save_state(project, state)
+
+
+def last_update_text(project):
+    """'Updated at 14:52, 46 new icons added' (the date first when it was not today) for the last real update, or '' when there was none."""
+    found = load_state(project).get('last_update')
+    if not isinstance(found, dict) or not found.get('when'):
+        return ''
+    when = datetime.datetime.fromisoformat(found['when'])
+    stamp = f'{when:%H:%M}' if when.date() == now().date() else f'{when:%Y-%m-%d %H:%M}'
+    return f'Updated at {stamp}' + (f', {found["what"]}' if found.get('what') else '')
+
+
 def zygote_python():
     """Zygote's own windowless Python (pythonw.exe in .zygote\\env). A shortcut starts it directly: no batch file, no console."""
-    path = ZYGOTE_ROOT / DOT / 'env' / 'Scripts' / 'pythonw.exe'
+    env = ZYGOTE_ROOT / '.venv' if (ZYGOTE_ROOT / 'deploy.json').is_file() else ZYGOTE_ROOT / DOT / 'env'      # a deployed folder's start script built .venv (bootstrap.py says the same)
+    path = env / 'Scripts' / 'pythonw.exe'
     if not path.is_file():
         raise ZygoteError(f'{path} was not found. Run app_tree\\bat\\RUN.bat once so that Zygote builds its environment, then make the shortcut again.')
     return path
@@ -1507,6 +1851,40 @@ def zygote_python():
 def shortcut_arguments(project):
     """What a project's shortcut hands to pythonw.exe: Zygote's main.py and the project to open."""
     return f'"{ZYGOTE_ROOT / "app" / "main.py"}" --project "{project}"'
+
+
+def read_link(link):
+    """(target, arguments, start-in folder) of a .lnk, or None when it is not there (or this is not Windows)."""
+    if os.name != 'nt' or not Path(link).is_file():
+        return None
+    import win32com.client
+    shortcut = win32com.client.Dispatch('WScript.Shell').CreateShortCut(str(link))
+    return shortcut.TargetPath, shortcut.Arguments, shortcut.WorkingDirectory
+
+
+def link_matches(found, target, arguments, start_in):
+    """True when what read_link found is what a fresh stamp would write (case and slash direction do not count in a path)."""
+    if found is None:
+        return False
+    same = lambda one, two: os.path.normcase(os.path.normpath(str(one))) == os.path.normcase(os.path.normpath(str(two)))
+    return same(found[0], target) and found[1].replace('/', '\\').lower() == arguments.replace('/', '\\').lower() and same(found[2], start_in)
+
+
+def shortcuts_wrong(project):
+    """The shortcuts of a project that are missing or hold another place (the project was moved, renamed, or came from a ZIP): [file name, ...]. Windows only
+    (elsewhere there is nothing to check and the list is empty). Nothing is written here."""
+    if not LAUNCHER_IS_SHORTCUT:
+        return []
+    root, wrong = clean_path(project), []
+    arguments = shortcut_arguments(root)
+    launcher = root / launcher_name(root)
+    if not link_matches(read_link(launcher), zygote_python(), arguments, root):
+        wrong.append(launcher.name)
+    safe = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', project_name(root)).strip(' .') or 'project'
+    user = root / DOT / 'user' / f'{safe} (Zygote).lnk'
+    if not link_matches(read_link(user), zygote_python(), arguments, root):
+        wrong.append(user.name)
+    return wrong
 
 
 def create_shortcut(project, name):
@@ -1529,6 +1907,55 @@ def create_shortcut(project, name):
 
 def icons_dir(project):
     return zpath(clean_path(project), 'assets', 'icons')
+
+
+ICON_SET = zpath(ZYGOTE_ROOT, 'assets', 'icons')                   # Zygote's icon set: the program icons, the folder pictures and CREDITS.txt (data: add a file to add an icon)
+
+
+def copy_icon_set(project):
+    """A new project starts with the whole icon set in its own icons folder (so Browse shows them and CREDITS.txt travels with them). A file the project has already is
+    never replaced. Returns the number of files copied. Zygote's own folder is not a target (it already is the set)."""
+    target = icons_dir(project)
+    if target == ICON_SET:
+        return 0
+    target.mkdir(parents=True, exist_ok=True)
+    count = 0
+    for source in sorted(ICON_SET.iterdir()):
+        if source.is_file() and source.name != 'README.md' and not (target / source.name).exists():
+            shutil.copy2(source, target / source.name)
+            count += 1
+    return count
+
+
+def icon_changes(project):
+    """(missing, differing): the names in Zygote's icon set that this project's icons folder lacks, and those it has with other contents (compared by contents, never by date).
+    Zygote's own folder is not compared with itself."""
+    target = icons_dir(project)
+    if target == ICON_SET:
+        return [], []
+    missing, differing = [], []
+    for source in sorted(ICON_SET.iterdir()):
+        if not source.is_file() or source.name == 'README.md':
+            continue
+        mine = target / source.name
+        if not mine.exists():
+            missing.append(source.name)
+        elif not filecmp.cmp(source, mine, shallow=False):
+            differing.append(source.name)
+    return missing, differing
+
+
+def refresh_icons(project, replace=()):
+    """The core refresh of the icon set: every missing icon is added; the names in `replace` (the ones the person ticked) are replaced. Returns (added, replaced) counts."""
+    missing, differing = icon_changes(project)
+    target = icons_dir(project)
+    target.mkdir(parents=True, exist_ok=True)
+    for name in missing:
+        shutil.copy2(ICON_SET / name, target / name)
+    chosen = [name for name in replace if name in differing]
+    for name in chosen:
+        shutil.copy2(ICON_SET / name, target / name)
+    return len(missing), len(chosen)
 
 
 def program_icon(project):
@@ -1848,6 +2275,25 @@ def run_settings(project, mode):
     return {'runner': saved.get('runner', ''), 'entry': saved.get('entry', ''), 'args': saved.get('args', '')}
 
 
+ZYGOTE_ENTRY = 'app/main.py'                                    # where Zygote itself starts: the one special case (Run starts Zygote its own way; Deploy supplies this, saving nothing)
+
+
+def own_entry(project):
+    """The entry point Zygote knows for the project without being told: Zygote's own folder only ('' for every other project). Run and Deploy both ask here."""
+    return ZYGOTE_ENTRY if clean_path(project) == ZYGOTE_ROOT else ''
+
+
+ENTRY_NAMES = ('main.py', '__main__.py', 'app.py', 'run.py')
+ENTRY_FOLDERS = ('', 'app', 'app_tree')
+
+
+def entry_candidates(project):
+    """The files that may be the program's start, for the person to pick from: ENTRY_NAMES at the top of the project and in app and app_tree (never .zygote, deploy, zip
+    or an environment). Relative paths with forward slashes. Zygote only lists; nothing is chosen or saved here."""
+    root = clean_path(project)
+    return [(folder + '/' if folder else '') + name for folder in ENTRY_FOLDERS for name in ENTRY_NAMES if (root / folder / name).is_file()]
+
+
 def run_all(project):
     return {mode: run_settings(project, mode) for mode in RUN_MODES}
 
@@ -2029,6 +2475,187 @@ def save_look(project, light, outer):
     save_state(project, state)
 
 
+# ---- Developer, organization and license of a project (Project > License settings…, Project > New…); the record travels in the project's config ------------------
+LICENSE_DEFAULTS_FILE = Path(__file__).resolve().parents[1] / 'data' / 'license_defaults.json'
+LICENSE_TEXTS = zpath(ZYGOTE_ROOT, 'assets', 'licenses')              # the standard license texts, as data (Apache, GPL and MPL word for word)
+LICENSE_TYPES = ('MIT', 'Apache-2.0', 'BSD-3-Clause', 'GPL-3.0', 'MPL-2.0', 'Custom')
+LICENSE_FILE = 'LICENSE'
+LICENSE_KEYS = ('developer', 'developer_copyright', 'organization', 'organization_copyright', 'year', 'type', 'file')
+
+
+def license_defaults():
+    """What a project starts with: the names Luis declared in data/license_defaults.json, this year, no license type yet."""
+    try:
+        data = json.loads(LICENSE_DEFAULTS_FILE.read_text(encoding='utf-8'))
+        return {'developer': str(data['developer']), 'developer_copyright': bool(data['developer_copyright']), 'organization': str(data['organization']),
+                'organization_copyright': bool(data['organization_copyright']), 'year': str(now().year), 'type': str(data.get('type', '')), 'file': LICENSE_FILE}
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise ZygoteError(f'The license defaults cannot be read ({LICENSE_DEFAULTS_FILE}): {error}') from error
+
+
+def check_license(record):
+    """The record as it is saved (every key, the right kinds). A wrong type or an unsafe file path is refused, never repaired."""
+    if not isinstance(record, dict):
+        raise ZygoteError('The license record must be a table of settings.')
+    out = {'developer': str(record.get('developer', '')).strip(), 'developer_copyright': bool(record.get('developer_copyright', False)),
+           'organization': str(record.get('organization', '')).strip(), 'organization_copyright': bool(record.get('organization_copyright', False)),
+           'year': str(record.get('year', '')).strip(), 'type': str(record.get('type', '')).strip(), 'file': str(record.get('file', '') or LICENSE_FILE).strip().replace('\\', '/')}
+    if out['type'] and out['type'] not in LICENSE_TYPES:
+        raise ZygoteError(f'The license type {out["type"]!r} is not one of: {", ".join(LICENSE_TYPES)}.')
+    if out['year'] and not re.fullmatch(r'\d{4}(\s*[-,]\s*\d{4})*', out['year']):
+        raise ZygoteError(f'The year {out["year"]!r} is not a year (write 2026 or 2024-2026).')
+    if out['file'].startswith('/') or re.match(r'^[A-Za-z]:', out['file']) or '..' in out['file'].split('/'):
+        raise ZygoteError(f'The license file {out["file"]!r} must be a path inside the project.')
+    return out
+
+
+def license_record(project):
+    """The saved record, or None when the project has none yet."""
+    saved = load_state(project).get('license')
+    return check_license(saved) if saved else None
+
+
+def save_license(project, record):
+    state = load_state(project)
+    state['license'] = check_license(record)
+    save_state(project, state)
+    return state['license']
+
+
+def copyright_names(record):
+    return ', '.join(name for name, ticked in ((record['developer'], record['developer_copyright']), (record['organization'], record['organization_copyright'])) if ticked and name)
+
+
+def license_notice(project):
+    """The one line a project shows (About box, deploy.json): "© 2026 Luis R. Lopez, RedHorseVR. Licensed under MIT (see LICENSE)." A missing part is left out; '' when
+    the project has no record or nothing to say."""
+    record = license_record(project)
+    if not record:
+        return ''
+    parts = []
+    names = copyright_names(record)
+    if names:
+        parts.append(f'\u00a9 {record["year"] + " " if record["year"] else ""}{names}.')
+    if record['type']:
+        if record['type'] == 'Custom':
+            parts.append(f'License: see {record["file"]}.')
+        else:
+            parts.append(f'Licensed under {record["type"]}' + (f' (see {record["file"]}).' if (Path(project) / record['file']).is_file() else '.'))
+    return ' '.join(parts)
+
+
+def license_text(record):
+    """The text of a standard license for this record (the copyright line filled in where the license has one). Custom has no standard text: raises."""
+    if record['type'] not in LICENSE_TYPES or record['type'] == 'Custom':
+        raise ZygoteError('A custom license has no standard text: put your own file in the project and choose it.')
+    text = (LICENSE_TEXTS / f'{record["type"]}.txt').read_text(encoding='utf-8')
+    line = f'Copyright (c) {record["year"] + " " if record["year"] else ""}{copyright_names(record) or "the authors"}'
+    return text.replace('{copyright}', line)
+
+
+def own_license_file(project, record=None):
+    """The project's license file as the License settings box shows it: the file's relative name when the project has a license file that is its own (the record says
+    Custom, or the record has no type and the LICENSE file is there), else ''. A LICENSE that Zygote wrote for a standard type is not "its own"."""
+    record = record or license_record(project) or {'type': '', 'file': LICENSE_FILE}
+    if record['type'] not in ('', 'Custom'):
+        return ''
+    return record['file'] if (clean_path(project) / record['file']).is_file() else ''
+
+
+def license_file_in_the_way(project, record):
+    """True when a standard type would be written and the project's file of that name holds something else (so the person is asked first)."""
+    record = check_license(record)
+    target = clean_path(project) / record['file']
+    if record['type'] in ('', 'Custom') or not target.is_file():
+        return False
+    return target.read_text(encoding='utf-8', errors='replace') != license_text(record)
+
+
+def backup_license(project, rel):
+    """Rename a license file to <name>.old (never a delete); when that name is taken, to <name>.<date time>.old, then with a number. Returns the new name."""
+    root = clean_path(project)
+    source = root / rel
+    stamp = now().strftime('%Y%m%d-%H%M%S')
+    target, number = root / f'{rel}.old', 1
+    if target.exists():
+        target = root / f'{rel}.{stamp}.old'
+    while target.exists():
+        number += 1
+        target = root / f'{rel}.{stamp}-{number}.old'
+    source.rename(target)
+    return target.name
+
+
+def write_license_file(project, record, replace=False):
+    """Put the license file in the project: 'written' (there was none), 'replaced' (replace=True: the old one was renamed to LICENSE.old first), 'kept' (a file of that
+    name exists and replace is False: never replaced), 'none' (no type, or Custom)."""
+    record = check_license(record)
+    if not record['type'] or record['type'] == 'Custom':
+        return 'none'
+    target = clean_path(project) / record['file']
+    status = 'written'
+    if target.exists():
+        if not replace:
+            return 'kept'
+        if target.read_text(encoding='utf-8', errors='replace') == license_text(record):
+            return 'kept'                                          # the same text is there already: nothing to back up
+        backup_license(project, record['file'])
+        status = 'replaced'
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(license_text(record), encoding='utf-8')
+    return status
+
+
+def adopt_license_file(project, source):
+    """Browse in the License settings box: a license file the person found. One inside the project is used where it is; one outside is copied to LICENSE (an old LICENSE
+    is renamed to LICENSE.old first). Returns the relative name the record takes (type Custom)."""
+    root, source = clean_path(project), clean_path(source)
+    if not source.is_file():
+        raise ZygoteError(f'The license file is not a file: {source}')
+    rel = project_relative(root, source)
+    if rel:
+        return rel
+    target = root / LICENSE_FILE
+    if target.exists():
+        backup_license(root, LICENSE_FILE)
+    shutil.copy2(source, target)
+    return LICENSE_FILE
+
+
+def check_new_project(parent, name):
+    """The folder a new project would be: parent/name. The name must be a plain folder name and the folder must not be there already (nothing is ever overwritten)."""
+    parent = Path(parent)
+    if not parent.is_dir():
+        raise ZygoteError(f'The folder {parent} is not there.')
+    check_item_name((name or '').strip())
+    folder = parent / name.strip()
+    if folder.exists():
+        raise ZygoteError(f'{folder} is there already. Pick another name or another folder (a new project never replaces a folder).')
+    return folder
+
+
+def create_project(parent, name, record):
+    """Project > New…: make the folder, give it the Zygote baseline, the license record and (for a standard license) its file. Returns the folder."""
+    folder = check_new_project(parent, name)
+    record = dict(record)
+    source = record.pop('source', '')                          # a license file found with Browse… in the dialog
+    record = check_license(record)
+    folder.mkdir()
+    try:
+        adopt_project(folder, name.strip())
+        set_project_name(folder, name.strip())
+        if source:
+            record.update(type='Custom', file=adopt_license_file(folder, source))
+        save_license(folder, record)
+        write_license_file(folder, record)
+        copy_icon_set(folder)
+        update_core(folder)                                        # the project starts with its own copy of this Zygote: its first open asks nothing
+    except Exception:
+        shutil.rmtree(folder, ignore_errors=True)                  # a half-made project is not left behind
+        raise
+    return clean_path(folder)
+
+
 # ---- Project history: .zygote\notes\PROJECT_HISTORY.json (travels with the project; dates are inside the data) ---------------------
 HISTORY_REL = TREE + '/notes/PROJECT_HISTORY.json'
 
@@ -2053,7 +2680,7 @@ def save_history(project, data):
     path.write_text(json.dumps(data, indent=2) + '\n', encoding='utf-8')
 
 
-def record_event(project, what):
+def record_event(project, what, drop=None):
     """Add one dated line to the project's history. Only a project that has an app tree keeps a history (a plain folder is left alone).
     The first line also records the Zygote version the history started with. True when written."""
     if not (Path(project) / TREE).is_dir():
@@ -2062,7 +2689,10 @@ def record_event(project, what):
     tool = tool_version()
     if not data:
         data = {'started_with': tool, 'last_upgraded_to': tool, 'events': []}
-    data['events'].append({'when': now().isoformat(timespec='seconds'), 'zygote': tool, 'what': what})
+    event = {'when': now().isoformat(timespec='seconds'), 'zygote': tool, 'what': what}
+    if drop:
+        event['drop'] = drop                                   # {zip, before, after, changed, kept, overridden}: what a dropped ZIP did, for the history window
+    data['events'].append(event)
     save_history(project, data)
     return True
 
@@ -2086,6 +2716,60 @@ def note_tool_version(project):
     data['last_upgraded_to'] = tool
     save_history(project, data)
     return line
+
+
+# ---- History archive: the entries up to a chosen one are packed into a ZIP in the notes folder and replaced by one line ------------------
+ARCHIVE_PREFIX = 'HISTORY_ARCHIVE_'
+
+
+def entry_count(event):
+    """How many real entries an event stands for (an archive line stands for the ones inside it)."""
+    return event['archive']['count'] if event.get('archive') else 1
+
+
+def archive_history(project, last_index):
+    """Pack events 0..last_index into HISTORY_ARCHIVE_<number>.zip (events.json inside) and put one archive line in their place. The ZIP is written and read back
+    before the history changes. Returns the archive line (a dict with 'archive': zip, count, first, last)."""
+    data = load_history(project)
+    events = data.get('events', [])
+    if not 0 <= last_index < len(events):
+        raise ZygoteError('There is no such history entry to archive up to.')
+    packed = events[:last_index + 1]
+    folder = history_path(project).parent
+    number = 1
+    while (folder / f'{ARCHIVE_PREFIX}{number:03d}.zip').exists():
+        number += 1
+    name = f'{ARCHIVE_PREFIX}{number:03d}.zip'
+    with zipfile.ZipFile(folder / name, 'w', zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr('events.json', json.dumps(packed, indent=2))
+    if len(read_archive(project, name)) != len(packed):
+        raise ZygoteError(f'{name} could not be read back: the history was not changed.')
+    count = sum(entry_count(one) for one in packed)
+    line = {'when': packed[0]['when'], 'zygote': tool_version(), 'what': f'Archived {count} entries', 'archive': {'zip': name, 'count': count, 'first': packed[0]['when'], 'last': packed[-1]['when']}}
+    data['events'] = [line] + events[last_index + 1:]
+    save_history(project, data)
+    return line
+
+
+def read_archive(project, name):
+    """The events inside an archive ZIP of this project's notes folder."""
+    path = history_path(project).parent / name
+    if not path.is_file():
+        raise ZygoteError(f'The archive {name} was not found in {path.parent}.')
+    with zipfile.ZipFile(path) as archive:
+        return json.loads(archive.read('events.json').decode('utf-8'))
+
+
+def unpack_archive(project, name):
+    """Put the entries of an archive back into the history for good (the archive line is replaced by them). The ZIP stays on disk."""
+    data = load_history(project)
+    events = data.get('events', [])
+    for index, event in enumerate(events):
+        if event.get('archive', {}).get('zip') == name:
+            data['events'] = events[:index] + read_archive(project, name) + events[index + 1:]
+            save_history(project, data)
+            return
+    raise ZygoteError(f'The history has no line for the archive {name}.')
 
 
 def history_text(project):

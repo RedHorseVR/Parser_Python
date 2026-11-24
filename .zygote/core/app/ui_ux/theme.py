@@ -13,11 +13,11 @@ class Theme:
         'dark': dict(window='#1e052b', base='#1e1e1e', text='#e6e6e6', disabled='#8a8a8a', dim='#a0a0a0',
                      button_top='#f2f2f2', button_bottom='#cfcfcf', hover='#e3efff', pressed='#b9cde8',
                      highlight='#2f6fb8', title_bg='#383838', title_border='#555555', frame='#6a6a6a',
-                     drop_bg='#262626', error='#ff7b7b', sacred='#5aa9ff', rebuild='#2ec4b6', work='#8fd18f', outline='#ffffff', bright='#ffc94d'),
+                     drop_bg='#262626', error='#ff7b7b', warning='#ffd23f', sacred='#5aa9ff', rebuild='#2ec4b6', work='#8fd18f', outline='#ffffff', bright='#ffc94d'),
         'light': dict(window='#f0f0f0', base='#ffffff', text='#111111', disabled='#8a8a8a', dim='#6a6a6a',
                       button_top='#fdfdfd', button_bottom='#d9d9d9', hover='#eaf3ff', pressed='#c4d6ee',
                       highlight='#3b7bd4', title_bg='#e4e4e4', title_border='#b0b0b0', frame='#7a7a7a',
-                      drop_bg='#f6f6f6', error='#b00020', sacred='#1f6fb5', rebuild='#00796b', work='#1f7a1f', outline='#8a8a8a', bright='#b35c00'),
+                      drop_bg='#f6f6f6', error='#b00020', warning='#8a6d00', sacred='#1f6fb5', rebuild='#00796b', work='#1f7a1f', outline='#8a8a8a', bright='#b35c00'),
     }
     DEFAULT = 'dark'
     BUTTON_TEXT = '#000000'              # buttons stay light in both themes, so their text is always black
@@ -48,6 +48,8 @@ class Theme:
         note = '#000000' if (0.299 * bar.redF() + 0.587 * bar.greenF() + 0.114 * bar.blueF()) > 0.5 else c['text']          # the note under the version: black on a light bar, the text colour on a dark one, never grey on the bar colour
         light_window = (0.299 * bar.redF() + 0.587 * bar.greenF() + 0.114 * bar.blueF()) > 0.5
         on_window = '#111111' if light_window else '#f2f2f2'            # the words on a dialog's own background (the person's colour): dark on a light one, light on a dark one, whatever the theme
+        error_fill = QColor(c['error'])
+        on_error = '#000000' if (0.299 * error_fill.redF() + 0.587 * error_fill.greenF() + 0.114 * error_fill.blueF()) > 0.5 else '#ffffff'      # the words of the red toast
         error_on_window = '#b00020' if light_window else '#ff9a9a'
         base = QColor(c['base'])
         check = core.ui_picture('check_dark.png' if (0.299 * base.redF() + 0.587 * base.greenF() + 0.114 * base.blueF()) > 0.5 else 'check_light.png').as_posix()     # a check mark in the text's contrast, never a filled square
@@ -89,6 +91,7 @@ QHeaderView::section {{ color: {c['text']}; background: {c['title_bg']}; border:
 QTableWidget {{ color: {c['text']}; background: {c['base']}; border: 1px solid {c['title_border']}; gridline-color: {c['title_border']}; }}
 #bright {{ color: {c['bright']}; }}
 #toast {{ color: #000000; background: {c['bright']}; border: 2px solid #ffffff; border-radius: 8px; padding: 10px 26px; font-size: 16px; font-weight: bold; }}
+#toast[kind="warning"] {{ color: {on_error}; background: {c['error']}; }}
 #dropbox {{ border: 2px dashed {c['frame']}; border-radius: 6px; color: {c['text']}; background: {c['drop_bg']}; }}
 #entryline {{ border: 2px dotted {c['frame']}; border-radius: 4px; padding: 3px; }}
 #dim {{ color: {note}; }}

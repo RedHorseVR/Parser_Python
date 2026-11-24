@@ -1,0 +1,18 @@
+{
+  "theme": "dark",
+  "outer_color": "#6f204f",
+  "name": "Parser_Python",
+  "run": {
+    "debug": {
+      "runner": "",
+      "entry": "",
+      "args": ""
+    },
+    "runtime": {
+      "runner": "python",
+      "entry": "app/parse_Python.py",
+      "args": "test_files/test.py"
+    }
+  },
+  "icon": "app_tree/assets/icons/Gear-Up.ico"
+}
