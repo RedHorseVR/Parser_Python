@@ -118,11 +118,12 @@ def set_icon(window):
     """Zygote's icon on a window of the build (Windows: the .ico; elsewhere the .png). A missing icon never stops the build."""
     import tkinter
     icons = ROOT / 'app_tree' / 'assets' / 'icons'
+    pictures = ROOT / 'app' / 'assets'
     try:
         if os.name == 'nt' and (icons / 'zygote.ico').is_file():
             window.iconbitmap(str(icons / 'zygote.ico'))
-        elif (icons / 'zygote.png').is_file():
-            window.picture = tkinter.PhotoImage(file=str(icons / 'zygote.png'))
+        elif (pictures / 'zygote.png').is_file():
+            window.picture = tkinter.PhotoImage(file=str(pictures / 'zygote.png'))
             window.iconphoto(True, window.picture)
     except tkinter.TclError:
         pass

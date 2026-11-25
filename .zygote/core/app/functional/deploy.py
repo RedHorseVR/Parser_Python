@@ -38,7 +38,7 @@ SETUP_FILES = ('setup.bat', 'setup.sh', 'setup.command')              # the only
 SETUP_SCRIPT = core.zpath(core.ZYGOTE_ROOT, 'tools', 'deploy', 'deploy_setup.py')
 PACKAGE_README = core.zpath(core.ZYGOTE_ROOT, 'tools', 'deploy', 'PACKAGE_README.md')       # hand-written; Deploy copies it into program\README_RUNTIME.md
 START_DIR = core.zpath(core.ZYGOTE_ROOT, 'tools', 'deploy')
-DEPENDENCIES = 'app_tree/dependencies.json'   # written by hand by the project: what a deployed program cannot run without
+DEPENDENCIES = core.DEPENDENCIES_REL   # written by hand by the project: what a deployed program cannot run without
 ALWAYS_LEFT_OUT = ('.zygote/user', '.zygote/credentials', '.zygote/logs', '.zygote/env', '.git', 'zip',
                    'app_tree/tests', 'app_tree/notes', 'START_HERE.md')   # the machine's own and the build side's (tests, notes, the hand-over file): never carried and never offered, whatever a list says
 KINDS, TYPES = ('required', 'optional'), ('folder', 'file', 'runtime')
@@ -312,6 +312,10 @@ def _left_out(rel, never):
     return '.vfc' in parts or any(rel == gone or rel.startswith(gone + '/') for gone in ALWAYS_LEFT_OUT + never)
 
 
+ICONS_REL = 'app_tree/assets/icons/'
+CREDITS_NAME = ICONS_REL + 'CREDITS.txt'
+
+
 def files(project):
     """The project's files that go into the package, as (path, name inside the package): every required entry of dependencies.json and every ticked optional
     one, at the same path as in the project (so the program's own paths still work). An entry that is not there is refused with its name."""
@@ -339,6 +343,8 @@ def files(project):
                     continue
                 seen.add(inside)
                 out.append((Path(folder) / name, inside))
+    if any(name.startswith(ICONS_REL) for _, name in out) and CREDITS_NAME not in seen and core.CREDITS_FILE.is_file():      # Z 2.19.39: the credits of the icons travel whenever icons do (Zygote's core, where they live, is not carried)
+        out.append((core.CREDITS_FILE, CREDITS_NAME))
     record = core.license_record(project)                          # Z 2.19.20: the project's license file always travels (it is not in dependencies.json)
     if record and record['type'] and record['file'] not in seen and (root / record['file']).is_file() and not _left_out(record['file'], never):
         out.append((root / record['file'], record['file']))

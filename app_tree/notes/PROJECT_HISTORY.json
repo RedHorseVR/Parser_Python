@@ -1,6 +1,6 @@
 {
   "started_with": "Z_2.17.2",
-  "last_upgraded_to": "Z_2.19.37",
+  "last_upgraded_to": "Z_2.19.42",
   "events": [
     {
       "when": "2026-11-21T13:46:08-06:00",
@@ -66,6 +66,66 @@
       "when": "2026-11-24T01:24:07-06:00",
       "zygote": "Z_2.19.37",
       "what": "Opened with Zygote Z_2.19.37 (before: Z_2.19.35; forward)"
+    },
+    {
+      "when": "2026-11-24T12:58:04-06:00",
+      "zygote": "Z_2.19.37",
+      "what": "Standard layout: deploy\\ added"
+    },
+    {
+      "when": "2026-11-24T16:21:06-06:00",
+      "zygote": "Z_2.19.39",
+      "what": "Standard layout: examples\\ added, icons\\ added, icons_svg\\ added"
+    },
+    {
+      "when": "2026-11-24T16:21:08-06:00",
+      "zygote": "Z_2.19.39",
+      "what": "Opened with Zygote Z_2.19.39 (before: Z_2.19.37; forward)"
+    },
+    {
+      "when": "2026-11-24T16:32:48-06:00",
+      "zygote": "Z_2.19.39",
+      "what": "Standard layout: Libs\\ added"
+    },
+    {
+      "when": "2026-11-24T16:33:28-06:00",
+      "zygote": "Z_2.19.39",
+      "what": "Standard layout: Libs\\ added"
+    },
+    {
+      "when": "2026-11-24T16:34:20-06:00",
+      "zygote": "Z_2.19.39",
+      "what": "Standard layout: extras\\ added, examples\\ removed (it is in the recycle bin)"
+    },
+    {
+      "when": "2026-11-24T16:34:37-06:00",
+      "zygote": "Z_2.19.39",
+      "what": "Standard layout: Libs\\ added, examples\\ added"
+    },
+    {
+      "when": "2026-11-24T16:35:05-06:00",
+      "zygote": "Z_2.19.39",
+      "what": "Standard layout: examples\\ removed (it is in the recycle bin)"
+    },
+    {
+      "when": "2026-11-24T19:47:31-06:00",
+      "zygote": "Z_2.19.41",
+      "what": "Opened with Zygote Z_2.19.41 (before: Z_2.19.39; forward)"
+    },
+    {
+      "when": "2026-11-24T19:49:46-06:00",
+      "zygote": "Z_2.19.41",
+      "what": "Standard layout: icons: 19 moved to the recycle bin (icons: editable drawings (.svg))"
+    },
+    {
+      "when": "2026-11-24T19:49:50-06:00",
+      "zygote": "Z_2.19.41",
+      "what": "Icons folder: moved to the recycle bin: app_tree.png, bricks.png, CREDITS.txt, deploy.png, extras.png, project-rings.png, source.png, start_here.png, zygote.png"
+    },
+    {
+      "when": "2026-11-24T21:05:54-06:00",
+      "zygote": "Z_2.19.42",
+      "what": "Opened with Zygote Z_2.19.42 (before: Z_2.19.41; forward)"
     }
   ]
 }

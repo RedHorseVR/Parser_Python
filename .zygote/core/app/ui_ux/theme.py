@@ -53,6 +53,8 @@ class Theme:
         error_on_window = '#b00020' if light_window else '#ff9a9a'
         base = QColor(c['base'])
         check = core.ui_picture('check_dark.png' if (0.299 * base.redF() + 0.587 * base.greenF() + 0.114 * base.blueF()) > 0.5 else 'check_light.png').as_posix()     # a check mark in the text's contrast, never a filled square
+        tick_check = core.ui_picture('check_dark.png').as_posix()       # the boxes of the layout panel and the tick lists: always a light box with a black mark, clear on a dark window
+        tick_dash = core.ui_picture('dash_dark.png').as_posix()
         return f'''
 QToolBar {{ background: {c['window']}; border: none; spacing: 6px; }}
 QPushButton {{ color: {cls.BUTTON_TEXT}; background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {c['button_top']}, stop:1 {c['button_bottom']});
@@ -66,6 +68,14 @@ QPushButton#picturebutton:hover {{ background: {c['hover']}; }}
 QCheckBox {{ color: {c['text']}; }}
 QCheckBox::indicator {{ width: 13px; height: 13px; border: 1px solid {c['text']}; border-radius: 2px; background: {c['base']}; }}
 QCheckBox::indicator:checked {{ image: url({check}); }}
+QListWidget#tickbox::indicator {{ width: 16px; height: 16px; border: 1px solid #4a4a4a; border-radius: 2px; background: #f4f4f4; }}
+QListWidget#tickbox::indicator:checked, QListWidget#tickbox::indicator:checked:disabled {{ image: url({tick_check}); }}
+QListWidget#tickbox::indicator:indeterminate, QListWidget#tickbox::indicator:indeterminate:disabled {{ image: url({tick_dash}); }}
+QListWidget#tickbox::indicator:disabled {{ background: #e6e6e6; border: 1px solid #777777; }}
+QFrame#layoutrule {{ color: #9a9a9a; }}
+QLabel#restartwarning {{ color: #ffc24a; font-weight: bold; font-size: 14px; }}
+QWidget#restartnote {{ background: #ffd54a; border-radius: 4px; }}
+QLabel#restarttext {{ color: #5a0000; font-weight: bold; background: transparent; }}
 QLabel {{ color: {c['text']}; }}
 QMenuBar {{ color: {c['text']}; background: {c['window']}; }}
 QMenuBar::item:selected {{ background: {c['highlight']}; }}

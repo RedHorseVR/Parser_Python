@@ -47,12 +47,14 @@ PRIVATE = ('.zygote/user', '.zygote/credentials')       # the ones a person may 
 NEVER_ZIPPED = ('.git', 'zip', 'deploy', '.zygote/logs', '.zygote/env', 'app_tree/tools/c/build')    # (__pycache__ is left out wherever it is)
 ZYGOTE_ROOT = Path(__file__).resolve().parents[2]
 ICON_FILE = zpath(ZYGOTE_ROOT, 'assets', 'icons', 'zygote.ico')
-SOURCE_ICON = zpath(ZYGOTE_ROOT, 'assets', 'icons', 'source.png')            # the picture of the app folder (the main code); data: replace the file to change it
-BRICKS_ICON = zpath(ZYGOTE_ROOT, 'assets', 'icons', 'bricks.png')            # the picture of the Libs folder (coloured bricks: the core modules a program is built from)
-EXTRAS_ICON = zpath(ZYGOTE_ROOT, 'assets', 'icons', 'extras.png')            # the picture of the extras folder (the falling blocks)
-START_HERE_ICON = zpath(ZYGOTE_ROOT, 'assets', 'icons', 'start_here.png')    # the picture of START_HERE.md (a brain over a book, blue, see-through)
-DEPLOY_ICON = zpath(ZYGOTE_ROOT, 'assets', 'icons', 'deploy.png')            # the picture of the deploy folder (the rocket; see functional/deploy.py)
-APP_TREE_ICON = zpath(ZYGOTE_ROOT, 'assets', 'icons', 'app_tree.png')      # the picture of the app_tree folder in the Workbench (data: replace the file to change it)
+SYSTEM_ASSETS = ZYGOTE_ROOT / 'app' / 'assets'                              # Z 2.19.39: Zygote's own pictures and the credits live in the core (app\\assets), never in a project's icons folder
+CREDITS_FILE = SYSTEM_ASSETS / 'CREDITS.txt'                                # where each icon of the set comes from and its license; travels with the icons (Make ZIP, Deploy)
+SOURCE_ICON = SYSTEM_ASSETS / 'source.png'            # the picture of the app folder (the main code); data: replace the file to change it
+BRICKS_ICON = SYSTEM_ASSETS / 'bricks.png'            # the picture of the Libs folder (coloured bricks: the core modules a program is built from)
+EXTRAS_ICON = SYSTEM_ASSETS / 'extras.png'            # the picture of the extras folder (the falling blocks)
+START_HERE_ICON = SYSTEM_ASSETS / 'start_here.png'    # the picture of START_HERE.md (a brain over a book, blue, see-through)
+DEPLOY_ICON = SYSTEM_ASSETS / 'deploy.png'            # the picture of the deploy folder (the rocket; see functional/deploy.py)
+APP_TREE_ICON = SYSTEM_ASSETS / 'app_tree.png'      # the picture of the app_tree folder in the Workbench (data: replace the file to change it)
 UI_PICTURES = zpath(ZYGOTE_ROOT, 'assets', 'ui')            # the pictures of Zygote's own buttons and rows (recycle_bin.png, up_folder.png): swap the file, no rebuild
 NOTEPAD = 'notepad.exe'                      # "Open as text" always uses Notepad
 VERSION_PLACES = ('.zygote/VERSION.txt', 'VERSION.txt')   # a folder from before Z 2.0 (or a foreign one) keeps it at the root; both are read
@@ -831,6 +833,10 @@ def make_zip(project, dest, include_private=False, include_user=None, include_cr
                     continue
                 zf.write(path, (top + '/' if top else '') + prefix + name)
                 count += 1
+        carried = (top + '/' if top else '') + CORE_REL + '/app/assets/CREDITS.txt'      # Z 2.19.39: the credits go with the icons even when the project's core lacks them
+        if project.resolve() != ZYGOTE_ROOT and any(icons_dir(project).glob('*')) and carried not in zf.namelist() and CREDITS_FILE.is_file():
+            zf.write(CREDITS_FILE, carried)
+            count += 1
     return count
 
 
@@ -1739,7 +1745,7 @@ def make_package(project, zip_dest, kind, include_user=False, include_credential
     return count, written
 
 
-RINGS_FILE = zpath(ZYGOTE_ROOT, 'assets', 'icons', 'project-rings.png')    # Zygote's double ring with the middle blanked (data)
+RINGS_FILE = SYSTEM_ASSETS / 'project-rings.png'    # Zygote's double ring with the middle blanked (data)
 
 
 def launcher_icon(project):
@@ -1909,11 +1915,11 @@ def icons_dir(project):
     return zpath(clean_path(project), 'assets', 'icons')
 
 
-ICON_SET = zpath(ZYGOTE_ROOT, 'assets', 'icons')                   # Zygote's icon set: the program icons, the folder pictures and CREDITS.txt (data: add a file to add an icon)
+ICON_SET = zpath(ZYGOTE_ROOT, 'assets', 'icons')                   # Zygote's icon set: the program icons (.ico and .svg; the pictures Zygote draws are in SYSTEM_ASSETS) (data: add a file to add an icon)
 
 
 def copy_icon_set(project):
-    """A new project starts with the whole icon set in its own icons folder (so Browse shows them and CREDITS.txt travels with them). A file the project has already is
+    """A new project starts with the whole icon set in its own icons folder (so Browse shows them; the credits are in the core). A file the project has already is
     never replaced. Returns the number of files copied. Zygote's own folder is not a target (it already is the set)."""
     target = icons_dir(project)
     if target == ICON_SET:
@@ -1945,17 +1951,45 @@ def icon_changes(project):
     return missing, differing
 
 
-def refresh_icons(project, replace=()):
-    """The core refresh of the icon set: every missing icon is added; the names in `replace` (the ones the person ticked) are replaced. Returns (added, replaced) counts."""
+def system_copies(project):
+    """The files in this project's icons folder that are Zygote's own system files left from before (the folder pictures and CREDITS.txt, which now live in the core):
+    the names whose CONTENTS are exactly those of a file in Zygote's app\\assets, whatever the file is called ("app_tree copy.png" too). The person's own icons never match.
+    Zygote's own folder has none."""
+    target = icons_dir(project)
+    if target == ICON_SET or not target.is_dir() or not SYSTEM_ASSETS.is_dir():
+        return []
+    ours = [path for path in sorted(SYSTEM_ASSETS.iterdir()) if path.is_file()]
+    found = []
+    for path in sorted(target.iterdir()):
+        if path.is_file() and any(path.stat().st_size == one.stat().st_size and filecmp.cmp(path, one, shallow=False) for one in ours):
+            found.append(path.name)
+    return found
+
+
+def clear_system_copies(project, names):
+    """Move the ticked old copies into the project's recycle bin; a name that is no longer an exact copy is kept. Returns the names moved."""
+    target = icons_dir(project)
+    allowed = set(system_copies(project))
+    moved = []
+    for name in names:
+        if name in allowed:
+            trash_path(project, target / name)
+            moved.append(name)
+    return moved
+
+
+def refresh_icons(project, replace=(), add_missing=True):
+    """The refresh of the icon set: the missing icons are added when `add_missing` (the update does not: the layout panel's icon lines add them when ticked); the names in
+    `replace` (the ones the person ticked) are replaced. Returns (added, replaced) counts."""
     missing, differing = icon_changes(project)
     target = icons_dir(project)
     target.mkdir(parents=True, exist_ok=True)
-    for name in missing:
+    for name in missing if add_missing else ():
         shutil.copy2(ICON_SET / name, target / name)
     chosen = [name for name in replace if name in differing]
     for name in chosen:
         shutil.copy2(ICON_SET / name, target / name)
-    return len(missing), len(chosen)
+    return (len(missing) if add_missing else 0), len(chosen)
 
 
 def program_icon(project):
@@ -2203,52 +2237,195 @@ def tree_files_missing(project):
     return [rel for rel in missing_baseline(project) if rel.replace('\\', '/').split('/')[0] in TREE_FOLDERS]
 
 
-def layout_missing(project):
-    """The standard items this project lacks, as the layout file's entries plus 'picture' (the file) and 'count' (files, for the tree). [] for Zygote's own folder and for a
-    project that still keeps the older layout (that one is moved first). A folder or file counts as there in any letter case."""
+def icon_names(one):
+    """The file names of Zygote's icon set that an `icons` item of the layout covers (suffix = only that suffix; other = everything except those suffixes; README.md never)."""
+    names = [path.name for path in sorted(ICON_SET.iterdir()) if path.is_file() and path.name != 'README.md']
+    if one.get('suffix'):
+        return [name for name in names if name.lower().endswith(one['suffix'])]
+    return [name for name in names if not name.lower().endswith(tuple(one.get('other', ())))]
+
+
+def folder_removable(folder, note):
+    """True for a folder that is empty or holds only the README Zygote made (identical to its note): such a folder may be removed from the layout panel."""
+    inside = list(folder.iterdir())
+    if not inside:
+        return True
+    return len(inside) == 1 and inside[0].name == 'README.md' and note.is_file() and inside[0].read_bytes() == note.read_bytes()
+
+
+def layout_picture_for(one):
+    return (SYSTEM_ASSETS / one['picture']) if one.get('picture') else layout_picture(one['key'])
+
+
+DEPENDENCIES_REL = 'app_tree/dependencies.json'                      # the project's own list of what a deployed program needs (Deploy reads it; so does the layout panel)
+ICONS_REL = 'app_tree/assets/icons'
+
+
+def dependency_paths(project):
+    """The paths the project's dependency list names (required ones and optional ones), as 'a/b/c' text. None when the file cannot be read (the caller then treats everything
+    as used: nothing is removed on a guess). [] when the project has no list."""
+    path = clean_path(project) / DEPENDENCIES_REL
+    if not path.is_file():
+        return []
+    try:
+        entries = json.loads(path.read_text(encoding='utf-8')).get('dependencies')
+        return [str(one['path']).replace('\\', '/').strip('/') for one in entries]
+    except (ValueError, AttributeError, KeyError, TypeError):
+        return None
+
+
+def folder_in_use(project, key):
+    """The reason the project uses the folder `key` (a sentence), or ''. In use: the saved entry point (either mode) is inside it, or a REQUIRED dependency path is inside it."""
+    project = clean_path(project)
+    key = key.lower()
+    for mode in ('runtime', 'debug'):
+        entry = entry_point(project, mode)
+        if entry and str(entry).replace('\\', '/').lower().split('/')[0] == key:
+            return f'the {mode} entry point ({entry}) is in it'
+    path = project / DEPENDENCIES_REL
+    if path.is_file():
+        try:
+            for one in json.loads(path.read_text(encoding='utf-8')).get('dependencies') or []:
+                if one.get('kind') == 'required' and str(one.get('path', '')).replace('\\', '/').strip('/').lower().split('/')[0] == key:
+                    return f'the dependency list ({DEPENDENCIES_REL}) requires {one.get("path")}'
+        except (ValueError, AttributeError, TypeError):
+            return f'the dependency list ({DEPENDENCIES_REL}) cannot be read, so nothing is removed'
+    return ''
+
+
+def icons_in_use(project):
+    """{icon file name: why the project uses it} for the icons folder: the saved program icon, and the icons the dependency list names. The key '*' means all of them
+    (the list carries the whole icons folder, or it cannot be read)."""
+    project = clean_path(project)
+    used = {}
+    saved = load_state(project).get('icon')
+    if saved and str(saved).replace('\\', '/').lower().startswith(ICONS_REL):
+        used[Path(saved).name] = 'it is the program icon (Project settings)'
+    listed = dependency_paths(project)
+    if listed is None:
+        return {'*': f'{DEPENDENCIES_REL} cannot be read'}
+    for rel in listed:
+        if rel.lower() == ICONS_REL:
+            return {'*': f'{DEPENDENCIES_REL} carries the whole icons folder'}
+        if rel.lower().startswith(ICONS_REL + '/'):
+            used[Path(rel).name] = f'{DEPENDENCIES_REL} lists it'
+    return used
+
+
+def layout_state(project):
+    """Every standard item with what this project has, for the panel on Update project's core. [] for Zygote's own folder and for a project that still keeps the older layout
+    (that one is moved first). Each entry: the layout file's fields plus present, state ('checked' | 'unchecked' | 'partial'), enabled (the person may change the box),
+    tip (the hover text), picture, count (files that would be added: the tree, an icon line), names (the icons missing). A folder or file counts as there in any letter case."""
     project = clean_path(project)
     if project == ZYGOTE_ROOT or is_legacy_layout(project):
         return []
-    names = {path.name.lower() for path in project.iterdir()}
+    names = {path.name.lower(): path for path in project.iterdir()}
     out = []
     for one in standard_layout():
-        count = 0
+        entry = dict(one, count=0, names=[], picture=layout_picture_for(one), tip=one.get('tip', ''))
+        required = bool(one.get('required'))
         if one['kind'] == 'tree':
-            count = len(tree_files_missing(project))
-            if not count:
-                continue
-        elif one['key'].lower() in names:
-            continue
-        out.append(dict(one, count=count, picture=layout_picture(one['key'])))
+            entry['names'] = tree_files_missing(project)
+            entry['count'] = len(entry['names'])
+            entry.update(present=not entry['count'], state='checked', enabled=False)
+            if entry['count']:
+                entry['tip'] += f' {entry["count"]} missing file{"s" if entry["count"] != 1 else ""} will be added when you press Continue.'
+        elif one['kind'] == 'file':
+            there = one['key'].lower() in names
+            entry.update(present=there, state='checked', enabled=False, count=0 if there else 1)
+            if not there:
+                entry['tip'] += ' It will be added when you press Continue.'
+        elif one['kind'] == 'icons':
+            wanted = icon_names(one)
+            target = icons_dir(project)
+            have = [name for name in wanted if (target / name).exists()]
+            missing = [name for name in wanted if name not in have]
+            used = icons_in_use(project)
+            kept = list(have) if '*' in used else [name for name in have if name in used]
+            free = [name for name in have if name not in kept]
+            if not have:
+                state = 'checked' if one['default'] else 'unchecked'
+            else:
+                state = 'checked' if not missing else 'partial'
+            entry.update(present=not missing, state=state, enabled=bool(missing or free or not have), count=len(missing), names=missing, have=have, kept=kept, free=free)
+            why = used.get('*') or ''
+            if kept:
+                entry['stamp'] = 'IN USE' if not free else 'SOME IN USE'
+                shown = ', '.join(f'{name} ({used.get("*") or used[name]})' for name in kept[:8]) + (f' and {len(kept) - 8} more' if len(kept) > 8 else '')
+                entry['tip'] = (f'{"All" if not free else "Some"} of these icons are in use and stay: {shown}. ' +
+                                ('Unticking moves only the ones not in use to the recycle bin.' if free else 'It cannot be unticked.'))
+            elif not missing:
+                entry['tip'] = f'All {len(wanted)} are there. Unticking moves them to the recycle bin of the project (only the files with these names; yours with other names stay).'
+            if missing:
+                shown = ', '.join(missing[:6]) + (f' and {len(missing) - 6} more' if len(missing) > 6 else '')
+                entry['tip'] = (entry['tip'] + ' ' if kept else '') + (f'{len(have)} of {len(wanted)} are there. Ticking adds: {shown}. A file with the same name is never replaced. ' +
+                                                                      ('Unticking moves the ones that are there and not in use (by name) to the recycle bin of the project.' if free else ''))
+        else:
+            folder = names.get(one['key'].lower())
+            if folder is None or not folder.is_dir():
+                entry.update(present=False, state='checked' if (one['default'] or required) else 'unchecked', enabled=not required)
+            else:
+                removable = folder_removable(folder, LAYOUT_NOTES / f'{one["key"]}.README.md')
+                reason = '' if required else folder_in_use(project, one['key'])
+                entry.update(present=True, state='checked', enabled=not required and not reason, modified=not removable, in_use=reason)
+                if reason:
+                    entry['stamp'] = 'IN USE'
+                    entry['tip'] += f' It is in use: {reason}. It cannot be unticked.'
+                elif not required:
+                    entry['tip'] += (' Unticking removes it (to the recycle bin of the project).' if removable
+                                     else f' It holds {len(list(folder.iterdir()))} item(s) that are yours: it will not be removed, you remove it by hand.')
+        if required:
+            entry['stamp'] = 'REQUIRED'
+        out.append(entry)
     return out
 
 
-def add_layout(project, keys):
-    """Add the standard items named in `keys` (only what is missing; nothing that exists is changed). Returns one sentence per item added."""
+def apply_layout(project, add, remove):
+    """Do what the panel said: make the items in `add` that are missing (the required ones that are missing are always made); remove the items in `remove`: a folder only
+    when it holds nothing but what Zygote made (empty, or Zygote's README), else it is refused; an icon line moves the files with Zygote's names to the recycle bin of the
+    project. Returns {'done': one sentence per change, 'refused': one sentence per removal that was not done}. Nothing that exists is changed otherwise."""
     project = clean_path(project)
-    wanted = set(keys)
-    done = []
-    for one in layout_missing(project):
-        if one['key'] not in wanted:
-            continue
-        if one['kind'] == 'tree':
-            files = tree_files_missing(project)
-            for rel in files:
-                target = zpath(project, rel)
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes((BASELINE / rel).read_bytes())
-            done.append(f'{TREE}: {len(files)} file{"s" if len(files) != 1 else ""} added')
-        elif one['kind'] == 'file':
-            (project / one['key']).write_text(start_here_text(project, project_name(project), read_version(project) or ''), encoding='utf-8')
-            done.append(f'{one["key"]} added')
-        else:
-            folder = project / one['key']
-            folder.mkdir()
-            note = LAYOUT_NOTES / f'{one["key"]}.README.md'
-            if note.is_file():
-                (folder / 'README.md').write_bytes(note.read_bytes())
-            done.append(f'{one["key"]}\\ added')
-    return done
+    done, refused = [], []
+    for one in layout_state(project):
+        key = one['key']
+        if key in remove and one['present'] and one['kind'] == 'folder' and not one.get('required'):
+            folder = next(path for path in project.iterdir() if path.name.lower() == key.lower())
+            if one.get('in_use'):
+                refused.append(f'Could not remove {key}: it is in use ({one["in_use"]}).')
+            elif one.get('modified'):
+                refused.append(f'Could not remove {key}: it has been modified. Remove it by hand if you want.')
+            else:
+                trash_path(project, folder)
+                done.append(f'{key}\\ removed (it is in the recycle bin)')
+        elif key in remove and one['kind'] == 'icons' and one.get('free'):
+            for name in one['free']:
+                trash_path(project, icons_dir(project) / name)
+            kept = f'; {len(one["kept"])} in use stay' if one.get('kept') else ''
+            done.append(f'icons: {len(one["free"])} moved to the recycle bin ({one["label"]}){kept}')
+        elif (key in add or one.get('required')) and not one['present']:
+            if one['kind'] == 'tree':
+                for rel in tree_files_missing(project):
+                    target = zpath(project, rel)
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes((BASELINE / rel).read_bytes())
+                done.append(f'{TREE}: {one["count"]} file{"s" if one["count"] != 1 else ""} added')
+            elif one['kind'] == 'file':
+                (project / key).write_text(start_here_text(project, project_name(project), read_version(project) or ''), encoding='utf-8')
+                done.append(f'{key} added')
+            elif one['kind'] == 'icons':
+                target = icons_dir(project)
+                target.mkdir(parents=True, exist_ok=True)
+                for name in one['names']:
+                    shutil.copy2(ICON_SET / name, target / name)
+                done.append(f'icons: {len(one["names"])} added ({one["label"]})')
+            else:
+                folder = project / key
+                folder.mkdir()
+                note = LAYOUT_NOTES / f'{key}.README.md'
+                if note.is_file():
+                    (folder / 'README.md').write_bytes(note.read_bytes())
+                done.append(f'{key}\\ added')
+    return {'done': done, 'refused': refused}
 
 
 # ---- Contents: read and edit a text file inside Zygote (no process); every Save keeps what was there in zip\edits ----------------

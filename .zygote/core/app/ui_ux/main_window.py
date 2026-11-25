@@ -36,9 +36,10 @@ from ui_ux.marks_scout import MarksScout
 from ui_ux.debug_control import DebugControl
 from ui_ux.code_window import DropToCode
 from ui_ux.instance import InstanceGuard, bring_to_front, flash
-from ui_ux.dialogs import AboutDialog, ConfirmProjectDialog, DeployDialog, GitSettingsDialog, HeldFilesDialog, HistoryWindow, IconsDialog, LayoutDialog, LicenseDialog, NewProjectDialog, MakeZipDialog, OpenProjectDialog, PreferencesDialog, ProjectSettingsDialog, RebuildDialog, RevertDialog, TestsDialog, ToolsDialog, CleanupDialog
+from ui_ux.dialogs import AboutDialog, ConfirmProjectDialog, DeployDialog, GitSettingsDialog, HeldFilesDialog, HistoryWindow, IconsDialog, LayoutDialog, SystemCopiesDialog, LicenseDialog, NewProjectDialog, MakeZipDialog, OpenProjectDialog, PreferencesDialog, ProjectSettingsDialog, RebuildDialog, RevertDialog, TestsDialog, ToolsDialog, CleanupDialog
 from ui_ux.lazy_model import LazyModel
 from ui_ux.models import FolderTint, ProjectModel, ProjectOnlyProxy
+from ui_ux.restart_note import RestartNote
 from ui_ux.toast import Toast
 from ui_ux.panels import PictureButton, TitledPanel
 from ui_ux.shell_tabs import BottomTabs, ShellPage, ShellWindow, TabGhost, close_button
@@ -84,6 +85,8 @@ class MainWindow(QMainWindow):
     def __init__(self, launch_folder=None):
         super().__init__()
         self.project = None
+        self.layout_heading = ('', '')                             # the two top lines of the standard layout panel (set by update_core)
+        self.layout_continued = False                              # the person pressed Continue on that panel (the new Zygote may start)
         self.instance = None                                      # the InstanceGuard of this window (one window per project)
         self.ready_sent = False
         self.launch_folder = Path(launch_folder) if launch_folder else Path.cwd()   # where Zygote was started from
@@ -501,6 +504,11 @@ class MainWindow(QMainWindow):
         box.setDefaultButton(QMessageBox.No)
         return box.exec() == QMessageBox.Yes
 
+    def restart_from_note(self):
+        """The Restart now button of the header note: pressing it is the person's yes (nothing is asked again)."""
+        self.need_project()
+        self.restart()
+
     def restart_menu(self):
         self.need_project()                                      # the new Zygote opens the same project
         if self.ask_restart_now():
@@ -633,6 +641,9 @@ class MainWindow(QMainWindow):
         column.addWidget(self.name_label)
         column.addWidget(self.version_label)
         column.addWidget(self.since_label)                       # the last change, centered under the version, readable on any bar colour
+        self.restart_note = RestartNote()                        # under the version: shown only while the disk has another Zygote version than this window runs
+        self.restart_note.restartClicked.connect(self.restart_from_note)
+        column.addWidget(self.restart_note)
         self.icon_label = PictureButton()                       # the program icon, large, at the far right of the bar: pressing it is Run
         self.icon_label.clicked.connect(lambda: self.guarded(self.run_as_product))      # (a press: the saved arguments)
         self.icon_label.setFixedSize(self.HEADER_ICON + 12, self.HEADER_ICON)
@@ -717,6 +728,7 @@ class MainWindow(QMainWindow):
             self.setWindowTitle(core.running_title())
             self.run_button.setText('Run')
             self.show_debug_tools(False)
+            self.restart_note.hide()
             return
         version, since = core.track_version(self.project)
         name = core.project_name(self.project)
@@ -729,6 +741,7 @@ class MainWindow(QMainWindow):
         self.run_button.setText('Run debug' if debug else 'Run')       # the Debug / Runtime buttons of Project settings
         self.show_debug_tools(debug)
         self.setWindowTitle(f'{name}, version {version or "?"} — {core.running_title()}')       # the project, then the tool that is RUNNING (not the one on disk)
+        self.restart_note.show_for(core.RUNNING_VERSION, core.tool_version())
 
     # ---- opening a project -----------------------------------------------------------------------------------
     def attach(self, folder):
@@ -950,51 +963,81 @@ class MainWindow(QMainWindow):
         return dialog.chosen if dialog.exec() == QDialog.Accepted else None
 
     def refresh_core_icons(self):
-        """The icon set is part of the core: missing icons are added without a question; icons that differ (by contents) are asked about in one panel, all unticked.
-        Returns the number of icons added (said in the log and in the history; the toast adds it when it is more than none)."""
+        """The icons the project has that differ (by contents) from Zygote's set are asked about in one panel, all unticked. Missing icons are NOT added here: the layout panel's
+        icon lines add them when ticked. Returns the number of icons replaced."""
         missing, differing = core.icon_changes(self.project)
         chosen = (self.ask_icons(differing) or []) if differing else []
-        added, replaced = core.refresh_icons(self.project, chosen)
-        if added:
-            self.say(f'{self.project.name}: {added} new icon{"s" if added != 1 else ""} added to the icons folder.')
-            self.note(f'Core update: {added} new icon{"s" if added != 1 else ""} added')
+        _added, replaced = core.refresh_icons(self.project, chosen, add_missing=False)
         if replaced:
             self.say(f'{self.project.name}: {replaced} icon{"s" if replaced != 1 else ""} replaced by the ones in the core set.')
             self.note(f'Core update: {replaced} icon{"s" if replaced != 1 else ""} replaced')
-        if added or replaced:
             self.refresh()
-        return added
+        return replaced
 
     def ask_layout(self, items):
-        """The panel of standard folders and files this project lacks (with their pictures; the default ones ticked). The keys ticked, or None for Cancel. Tests replace this."""
-        dialog = LayoutDialog(items, self)
-        return dialog.chosen if dialog.exec() == QDialog.Accepted else None
+        """The standard layout panel (every item, with its picture; what the project has is ticked). (keys to add, keys to remove), or None for Cancel. Tests replace this."""
+        dialog = LayoutDialog(items, self, headline=self.layout_heading, restart=(core.RUNNING_VERSION, core.tool_version()) if core.restart_pending() else None)
+        dialog.exec()
+        return None if dialog.cancelled else (dialog.add, dialog.remove)
 
     def offer_layout(self):
-        """Part of the core update: when the project lacks standard items (app, app_tree, deploy, START_HERE.md, extras, Libs) the person is offered them in one panel. Nothing is asked
-        when nothing is missing. Returns the number of items added."""
-        items = core.layout_missing(self.project)
-        if not items:
+        """Part of EVERY core update (also when the project is already current): the standard layout panel. It tells the update is running and reviews what the project has;
+        Continue adds the ticked and removes the unticked empty ones (the required ones that are missing are always added), Cancel changes nothing. Then the old copies of
+        Zygote's own pictures in the icons folder are offered for the recycle bin. Returns the number of changes."""
+        items = core.layout_state(self.project)
+        count = 0
+        self.layout_continued = True
+        if items:
+            self.close_toast()
+            answer = self.ask_layout(items)
+            if answer is None:
+                self.layout_continued = False
+                self.say('Standard layout: cancelled; nothing in the layout was changed.')
+                return 0
+            result = core.apply_layout(self.project, *answer)
+            done = result['done']
+            for line in done:
+                self.say(f'Standard layout: {line}')
+            for line in result['refused']:
+                self.say(f'Standard layout: {line}')
+                self.show_notice(line)
+            if done:
+                self.note('Standard layout: ' + ', '.join(done))
+                self.refresh()
+            count = len(done)
+        return count + self.offer_system_copies()
+
+    def show_notice(self, text):
+        """A plain message the person dismisses (something was not done and why). Tests replace this."""
+        QMessageBox.information(self, 'Zygote', text)
+
+    def ask_system_copies(self, names):
+        """The tick list of old system copies in the icons folder (all ticked). The ticked names, or None when the person cancels. Tests replace this."""
+        dialog = SystemCopiesDialog(names, self)
+        return dialog.chosen if dialog.exec() == QDialog.Accepted else None
+
+    def offer_system_copies(self):
+        """Zygote's own pictures and CREDITS.txt live in the core now: copies of them left in the project's icons folder are listed, and the ticked ones go to the recycle bin.
+        Only files with exactly Zygote's contents are listed, never the person's own icons. Returns the number moved."""
+        names = core.system_copies(self.project)
+        if not names:
             return 0
         self.close_toast()
-        chosen = self.ask_layout(items)
+        chosen = self.ask_system_copies(names)
         if not chosen:
-            self.say('Standard layout: nothing was added; the project stays as it is.')
+            self.say('Old copies of Zygote\'s pictures in the icons folder: left as they are.')
             return 0
-        done = core.add_layout(self.project, chosen)
-        for line in done:
-            self.say(f'Standard layout: {line}')
-        self.note('Standard layout: ' + ', '.join(done))
-        self.refresh()
-        return len(done)
+        moved = core.clear_system_copies(self.project, chosen)
+        for name in moved:
+            self.say(f'Icons folder: {name} moved to the recycle bin (Zygote keeps its own copy in the core).')
+        if moved:
+            self.note('Icons folder: moved to the recycle bin: ' + ', '.join(moved))
+            self.refresh()
+        return len(moved)
 
     @staticmethod
     def with_layout(text, count):
-        return text + (f', {count} standard item{"s" if count != 1 else ""} added' if count else '')
-
-    @staticmethod
-    def with_icons(text, added):
-        return text + (f', {added} new icon{"s" if added != 1 else ""} added' if added else '')
+        return text + (f', {count} layout change{"s" if count != 1 else ""}' if count else '')
 
     def ask_running_program(self):
         """A program still runs in the Console as the core is to be updated. True = stop it for the person. False = the person stops it themself first. Tests replace this."""
@@ -1034,15 +1077,19 @@ class MainWindow(QMainWindow):
             return False
         if core.core_is_current(self.project):
             fixed = core.LAUNCHER_IS_SHORTCUT and self.stamp_shortcut(toast=False)           # the shortcut check rides along: only what was wrong is said
-            added = self.refresh_core_icons()
-            if added:
-                core.remember_update(self.project, self.with_icons('', added).lstrip(', '))
+            replaced = self.refresh_core_icons()
+            self.layout_heading = (f'Checking {self.project.name}: its Zygote is {old}', 'Standard features of a Zygote project')
             laid = self.offer_layout()
+            if replaced or laid:
+                core.remember_update(self.project, ', '.join(([f'{replaced} icon{"s" if replaced != 1 else ""} replaced'] if replaced else []) + ([f'{laid} layout change{"s" if laid != 1 else ""}'] if laid else [])))
             last = core.last_update_text(self.project)
-            if added or laid:
-                self.show_toast(self.with_layout(self.with_icons('Update complete', added), laid))
+            if replaced or laid:
+                self.show_toast(self.with_layout('Update complete', laid))
             else:
                 self.show_toast('Shortcuts updated' if fixed else f'Already updated. {last}' if last else 'Already updated')
+            if core.restart_pending() and self.layout_continued:           # Continue was pressed: the new Zygote starts, the last step
+                self.say(f'Restarting Zygote to run {core.tool_version()}.')
+                self.restart(updated=True)
             return False
         self.close_toast()                                          # the question is asked over a clear window
         if not self.ask_update_core(self.project, old, new):
@@ -1057,16 +1104,22 @@ class MainWindow(QMainWindow):
         renamed = core.rename_launcher(self.project)             # the launcher carries the project's name (VFlow_Zide.lnk); only a rename
         if renamed:
             self.say(renamed)
-        added = self.refresh_core_icons()
-        core.remember_update(self.project, f'Zygote {new} copied' + (f', {added} new icon{"s" if added != 1 else ""} added' if added else ''))
-        self.refresh_structure()
-        laid = self.offer_layout()
+        self.layout_heading = (f'Updating {self.project.name} from {old or "no Zygote"} to {new}', 'Standard features of a Zygote project')
+        replaced, laid = 0, 0
+        try:                                                        # every step before the restart may fail loudly, but the restart is the last step and still comes (the core is replaced)
+            replaced = self.refresh_core_icons()
+            self.refresh_structure()
+            laid = self.offer_layout()
+        except Exception as error:                                  # the message is the whole point
+            self.say(f'ERROR: {error}')
+            self.show_error(str(error))
+        core.remember_update(self.project, self.with_layout(f'Zygote {new} copied', laid) + (f', {replaced} icon{"s" if replaced != 1 else ""} replaced' if replaced else ''))
         self.refresh()
-        if core.restart_pending():                                 # the Yes also covered this (the question said so): one restart
+        if core.restart_pending():                                 # the Yes (and Continue) also covered this (the question said so): one restart
             self.say(f'Restarting Zygote to run {new} ({"in a visible console that stays open" if after else "minimized, closing itself"}).')
             self.restart(updated=True)
         else:
-            self.show_toast(self.with_layout(self.with_icons('Update complete', added), laid))
+            self.show_toast(self.with_layout('Update complete', laid))
         return True
 
     def ask_cleanup(self, items):

@@ -96,11 +96,12 @@ class Welcome:
 
     def icon(self, window):
         icons = self.root / 'app_tree' / 'assets' / 'icons'
+        pictures = self.root / 'app' / 'assets'
         try:
             if os.name == 'nt' and (icons / 'zygote.ico').is_file():
                 window.iconbitmap(str(icons / 'zygote.ico'))
-            elif (icons / 'zygote.png').is_file():
-                self.picture = self.tk.PhotoImage(file=str(icons / 'zygote.png'))
+            elif (pictures / 'zygote.png').is_file():
+                self.picture = self.tk.PhotoImage(file=str(pictures / 'zygote.png'))
                 window.iconphoto(True, self.picture)
         except self.tk.TclError:
             pass                                                # a missing icon is not worth stopping the install for

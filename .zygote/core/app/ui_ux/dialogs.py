@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Signal, QProcess, QProcessEnvironment, QSize, Qt
 from PySide6.QtGui import QAction, QBrush, QColor, QPixmapCache, QGuiApplication, QIcon, QImage, QKeySequence, QPixmap, QTextCursor
-from PySide6.QtWidgets import (QWidget, QAbstractItemView, QCheckBox, QComboBox, QScrollArea, QGroupBox, QMessageBox, QPlainTextEdit, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QGridLayout, QHBoxLayout,
+from PySide6.QtWidgets import (QWidget, QAbstractItemView, QCheckBox, QComboBox, QScrollArea, QGroupBox, QMessageBox, QPlainTextEdit, QDialog, QFrame, QStyle, QStyleOptionViewItem, QStyledItemDelegate, QDialogButtonBox, QFileDialog, QFormLayout, QGridLayout, QHBoxLayout,
                                QColorDialog, QInputDialog, QLabel, QLineEdit, QPushButton, QRadioButton, QTableWidget, QTableWidgetItem, QListWidget, QListWidgetItem, QTreeWidget, QTreeWidgetItem, QVBoxLayout)
 
 import crashlog
@@ -1165,7 +1165,7 @@ class AboutDialog(QDialog):
         self.setWindowTitle('About Zygote')
         self.notice = notice
         picture = QLabel()
-        picture.setPixmap(QPixmap(str(core.ICON_FILE.with_suffix('.png'))).scaled(96, 96, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        picture.setPixmap(QPixmap(str(core.SYSTEM_ASSETS / 'zygote.png')).scaled(96, 96, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         text = QLabel(self.lines(notice))
         text.setTextInteractionFlags(Qt.TextSelectableByMouse)
         row = QHBoxLayout()
@@ -1672,6 +1672,7 @@ class TickListDialog(QDialog):
         label.setWordWrap(True)
         layout.addWidget(label)
         self.list = QListWidget()
+        self.list.setObjectName('tickbox')
         for key, text in lines:
             entry = QListWidgetItem(text)
             if pictures and pictures.get(key):                      # a line may carry its picture (the standard-layout panel)
@@ -1711,15 +1712,134 @@ class IconsDialog(TickListDialog):
                          [(name, name) for name in names], parent)
 
 
-class LayoutDialog(TickListDialog):
-    """The standard items this project lacks, each with its own picture and name; the ones marked default are ticked. Result: .chosen (keys). Cancel adds nothing."""
+class SystemCopiesDialog(TickListDialog):
+    """Old copies, in this project's icons folder, of pictures Zygote now keeps in its core: all ticked; the ticked ones go to the recycle bin."""
 
-    def __init__(self, items, parent=None):
-        lines = [(one['key'], f"{one['label']}   \u2014   {one['why']}" + (f"  ({one['count']} files)" if one.get('count') else '')) for one in items]
-        super().__init__('Zygote \u2014 the standard layout',
-                         'These standard folders and files are not in this project. Tick the ones Zygote may add. Nothing that is there is moved or changed; untick all to keep the project as it is.',
-                         lines, parent, ticked=[one['key'] for one in items if one['default']], pictures={one['key']: one['picture'] for one in items})
+    def __init__(self, names, parent=None):
+        super().__init__("Zygote — old copies of Zygote's own pictures",
+                         "These files are in this project's icons folder and are exactly the same as the ones Zygote keeps in its core (.zygote\\core\\app\\assets).\n"
+                         "Tick the ones to move to the recycle bin. Your own icons are never listed.",
+                         [(name, name) for name in names], parent, ticked=names)
+
+
+class StampDelegate(QStyledItemDelegate):
+    """A list line as usual, plus a coloured stamp in capitals at its right end (the layout panel's REQUIRED / IN USE / SOME IN USE): the reason a line cannot be unticked.
+    The check box of a locked (in use) line gets a light grey background, so it reads as different from the white boxes of the lines that can be changed."""
+    ROLE = Qt.UserRole + 1
+    COLOURS = {'REQUIRED': '#5fd35f', 'IN USE': '#ff7a7a', 'SOME IN USE': '#ffc24a'}
+    LOCKED_BOX = QColor('#a9a9a9')
+
+    def paint(self, painter, option, index):
+        super().paint(painter, option, index)
+        stamp = index.data(self.ROLE)
+        if not stamp:
+            return
+        painter.save()
+        if stamp != 'REQUIRED' and index.data(Qt.CheckStateRole) is not None and not (index.flags() & Qt.ItemIsUserCheckable):
+            box = QStyleOptionViewItem(option)
+            self.initStyleOption(box, index)
+            rect = option.widget.style().subElementRect(QStyle.SE_ItemViewItemCheckIndicator, box, option.widget)
+            painter.setPen(QColor('#555555'))
+            painter.setBrush(self.LOCKED_BOX)
+            painter.drawRoundedRect(rect.adjusted(0, 0, -1, -1), 2, 2)
+            mark = QPixmap(str(core.ui_picture('check_dark.png' if Qt.CheckState(index.data(Qt.CheckStateRole)) == Qt.Checked else 'dash_dark.png')))
+            painter.drawPixmap(rect, mark)
+        font = painter.font()
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(QColor(self.COLOURS.get(stamp, '#ff7a7a')))
+        painter.drawText(option.rect.adjusted(0, 0, -10, 0), Qt.AlignRight | Qt.AlignVCenter, stamp)
+        painter.restore()
+
+
+class LayoutDialog(QDialog):
+    """The standard layout panel of Update project's core: every standard item with its own picture; what the project has is ticked. The required lines (START_HERE.md,
+    app_tree) are first, greyed, above a separator line. Tick to add, untick to remove: a folder is removed only when it holds nothing but what Zygote made (the person is told
+    when it is refused); an icon line adds the missing icons, or moves the icons with Zygote's names to the recycle bin. Result after Continue: .add and .remove (keys).
+    Cancel: both empty and .cancelled."""
+
+    GREY = QColor('#8a8a8a')
+
+    def __init__(self, items, parent=None, headline=('', ''), restart=None):
+        super().__init__(parent)
+        self.setWindowTitle("Zygote \u2014 the standard layout")
+        self.items = {one['key']: one for one in items}
+        self.add, self.remove, self.cancelled = [], [], True
+        layout = QVBoxLayout(self)
+        first, second = headline
+        top = QLabel(first or 'The standard layout of a Zygote project')
+        font = top.font()
+        font.setPointSize(font.pointSize() + 4)
+        font.setBold(True)
+        top.setFont(font)
+        top.setWordWrap(True)
+        layout.addWidget(top)
+        if restart:
+            note = QLabel(f'RESTART REQUIRED: this window runs {restart[0]}, the files are {restart[1]}. Zygote restarts after Continue.')
+            note.setObjectName('restartwarning')
+            layout.addWidget(note)
+        sub = QLabel((second or 'What a Zygote project has') + ' \u2014 ticked = this project has it. Tick to add, untick to remove. Hover a line for more.')
+        sub.setWordWrap(True)
+        layout.addWidget(sub)
+        self.list = QListWidget()
+        self.list.setObjectName('tickbox')
         self.list.setIconSize(QSize(36, 36))
+        self.list.setItemDelegate(StampDelegate(self.list))
+        for number, one in enumerate(items):
+            entry = QListWidgetItem(f"{one['label']}   \u2014   {one['why']}")
+            entry.setData(Qt.UserRole, one['key'])
+            if one.get('picture'):
+                entry.setIcon(QIcon(str(one['picture'])))
+            entry.setToolTip(one['tip'])
+            entry.setData(StampDelegate.ROLE, one.get('stamp'))
+            if one.get('required'):                                    # no box at all: the system needs it; a grey band and the green word REQUIRED
+                entry.setBackground(QBrush(QColor('#3c3c3c')))
+                entry.setFlags(entry.flags() & ~Qt.ItemIsUserCheckable)
+            else:
+                entry.setCheckState({'checked': Qt.Checked, 'partial': Qt.PartiallyChecked, 'unchecked': Qt.Unchecked}[one['state']])
+                if one['enabled']:
+                    entry.setFlags(entry.flags() | Qt.ItemIsUserCheckable)
+                else:
+                    entry.setFlags(entry.flags() & ~Qt.ItemIsUserCheckable)
+                    entry.setForeground(QBrush(self.GREY))
+            self.list.addItem(entry)
+            if one.get('required') and not (number + 1 < len(items) and items[number + 1].get('required')) and number + 1 < len(items):
+                line = QListWidgetItem()                                  # the separator under the required group
+                line.setFlags(Qt.NoItemFlags)
+                line.setSizeHint(QSize(10, 14))
+                self.list.addItem(line)
+                rule = QFrame()
+                rule.setFrameShape(QFrame.HLine)
+                rule.setObjectName('layoutrule')
+                self.list.setItemWidget(line, rule)
+        self.list.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        rows = sum(14 if self.list.item(row).data(Qt.UserRole) is None else max(self.list.sizeHintForRow(row), 0) for row in range(self.list.count()))     # (the separator is 14 high)
+        self.list.setMinimumHeight(rows + 12)                          # every line shows, no scroll bars
+        layout.addWidget(self.list)
+        self.setMinimumWidth(900)
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        go = QPushButton('Continue')
+        go.clicked.connect(self.accept)
+        cancel = QPushButton('Cancel')
+        cancel.clicked.connect(self.reject)
+        buttons.addWidget(go)
+        buttons.addWidget(cancel)
+        layout.addLayout(buttons)
+
+    def accept(self):
+        self.cancelled = False
+        for row in range(self.list.count()):
+            key = self.list.item(row).data(Qt.UserRole)
+            if key is None:
+                continue
+            one, state = self.items[key], self.list.item(row).checkState()
+            if state == Qt.Checked and not one['present']:
+                self.add.append(key)
+            elif state == Qt.Unchecked and one['enabled'] and (one['present'] or one.get('have')):
+                self.remove.append(key)
+        super().accept()
 
 
 class HistoryTree(QTreeWidget):
