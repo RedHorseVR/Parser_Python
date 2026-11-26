@@ -40,6 +40,7 @@ from ui_ux.dialogs import AboutDialog, ConfirmProjectDialog, DeployDialog, GitSe
 from ui_ux.lazy_model import LazyModel
 from ui_ux.models import FolderTint, ProjectModel, ProjectOnlyProxy
 from ui_ux.restart_note import RestartNote
+from ui_ux.header_place import HeaderPlace
 from ui_ux.toast import Toast
 from ui_ux.panels import PictureButton, TitledPanel
 from ui_ux.shell_tabs import BottomTabs, ShellPage, ShellWindow, TabGhost, close_button
@@ -78,6 +79,8 @@ def label(point_size, bold=False, dim=False, bright=False):
 
 
 class MainWindow(QMainWindow):
+    MIN_WIDTH = 800                                               # one smallest window size for every project
+    MIN_HEIGHT = 540
     HEADER_ICON = 64                                              # the program icon at the right of the header, in pixels
 
     working_space_ready = Signal()                                 # the project's folder is in the folder view and in the tree
@@ -94,6 +97,7 @@ class MainWindow(QMainWindow):
         if ICON_FILE.is_file():
             self.setWindowIcon(QIcon(str(ICON_FILE)))
         self.setAcceptDrops(True)
+        self.setMinimumSize(self.MIN_WIDTH, self.MIN_HEIGHT)
         self.resize(1000, 660)
 
         self.path_label = QLabel('')
@@ -287,12 +291,11 @@ class MainWindow(QMainWindow):
         self.rows.setStretchFactor(0, 1)
         self.rows.setSizes([480, 110])
 
-        self.today_label = label(10)                              # the date and the last change sit on the project-location line, at its right
+        self.today_label = label(10)                              # the date: top right of the header, above the program icon (see build_toolbar)
         self.since_label = label(10, dim=True)                   # (the last change: under the version in the bar, see build_toolbar)
         self.since_label.setAlignment(Qt.AlignCenter)
         location = QHBoxLayout()
         location.addWidget(self.path_label, 1)
-        location.addWidget(self.today_label)
         central = QWidget()
         layout = QVBoxLayout(central)
         layout.addLayout(location)
@@ -651,13 +654,7 @@ class MainWindow(QMainWindow):
         self.icon_label.setAlignment(Qt.AlignCenter)            # the picture in the middle of the dotted drop target
         self.icon_label.accept_files(12)                        # files dropped on it run the program as product with them as the arguments (dotted line round the picture)
         self.icon_label.filesDropped.connect(lambda paths: self.guarded(functools.partial(self.run_as_product_with, paths)))
-        for widget in (None, title, None, self.icon_label):
-            if widget is None:
-                spacer = QWidget()
-                spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-                bar.addWidget(spacer)
-            else:
-                bar.addWidget(widget)
+        self.header_place = HeaderPlace(bar, title, self.today_label, self.icon_label)      # title block, date and icon: placed by it, never hidden by the toolbar
 
     # ---- state -----------------------------------------------------------------------------------------------
     ERROR_WORDS = re.compile(r'\b(error|errors|failed|failure|could not|cannot|can not|refused|not found)\b', re.IGNORECASE)
@@ -2850,6 +2847,7 @@ class MainWindow(QMainWindow):
             return core.install_zip(zip_path, project)
         except core.HeldFiles as asked:
             self.close_toast()
+            self.held_kept = asked.kept                         # the locked files left alone: the panel lists them too
             chosen = self.ask_held(asked.files)
             if chosen is None:
                 return None
@@ -2858,7 +2856,7 @@ class MainWindow(QMainWindow):
 
     def ask_held(self, files):
         """The panel of the locked files a ZIP carries that Zygote cannot call stale. The files ticked (replaced this once; they stay locked), or None for Cancel. Tests replace this."""
-        dialog = HeldFilesDialog(files, self)
+        dialog = HeldFilesDialog(files, self, getattr(self, 'held_kept', ()))
         return dialog.chosen if dialog.exec() == QDialog.Accepted else None
 
     def show_toast(self, text, hold=False):

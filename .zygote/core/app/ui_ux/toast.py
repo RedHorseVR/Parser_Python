@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QLabel
 class Toast(QLabel):
     SECONDS = 3.5          # the one time every toast stays (a result must be readable)
     WARNING_SECONDS = 5.0  # the red toast (something the person must act on) stays longer
+    MARGIN = 24            # free space kept at both sides of the window
     MINIMUM_HELD = 1.0     # a held toast (Updating) is seen at least this long before the next toast replaces it
 
     def __init__(self, window, text, hold=False, warning=False):
@@ -23,7 +24,13 @@ class Toast(QLabel):
         self.seconds = self.WARNING_SECONDS if warning else self.SECONDS
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.setAlignment(Qt.AlignCenter)
+        self.setWordWrap(True)                                       # a long text wraps; the toast never grows wider than the window
+        self.setMaximumWidth(max(60, window.width() - self.MARGIN))
         self.adjustSize()
+        if self.width() > self.maximumWidth():
+            self.resize(self.maximumWidth(), self.heightForWidth(self.maximumWidth()))
+        elif self.sizeHint().width() > self.maximumWidth():
+            self.resize(self.maximumWidth(), self.heightForWidth(self.maximumWidth()))
         self.move((window.width() - self.width()) // 2, (window.height() - self.height()) // 2)      # the middle of the window: the version line stays readable
         self.show()
         self.raise_()

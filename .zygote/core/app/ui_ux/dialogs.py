@@ -1696,11 +1696,23 @@ class TickListDialog(QDialog):
 class HeldFilesDialog(TickListDialog):
     """A dropped ZIP carries locked files that Zygote cannot call stale: the ticked ones are replaced this once and stay locked, the others are kept as they are."""
 
-    def __init__(self, files, parent=None):
+    def __init__(self, files, parent=None, kept=()):
         lines = [(one['rel'], one['rel'] + ('' if one['tracked'] else '     (no fingerprint yet: drop a ZIP and Zygote starts tracking this file)')) for one in files]
         super().__init__('Zygote — locked files in this ZIP',
                          'These files are locked, and the ZIP brings a copy that is not the one it brought last time (or Zygote has no record of the last copy).\n'
                          'Tick the ones the ZIP may replace this once. The others are kept as they are. Every file stays locked.', lines, parent)
+        self.kept_lines = list(kept)
+        if self.kept_lines:                                         # locked files the update leaves alone: listed, with no box to tick
+            head = QListWidgetItem('LOCKED, NOT IN THIS UPDATE (the ZIP has the old copy; kept as they are):')
+            head.setFlags(Qt.ItemIsEnabled)
+            font = head.font()
+            font.setBold(True)
+            head.setFont(font)
+            self.list.addItem(head)
+            for rel in self.kept_lines:
+                line = QListWidgetItem(rel + '     (locked, not replaced)')
+                line.setFlags(Qt.ItemIsEnabled)
+                self.list.addItem(line)
 
 
 class IconsDialog(TickListDialog):

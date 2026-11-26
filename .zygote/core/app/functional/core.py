@@ -552,9 +552,10 @@ def list_snapshots(project):
 class HeldFiles(ZygoteError):
     """A ZIP carries files the person locked, and Zygote cannot tell by itself that the copy is a stale one. `files` = [{'rel', 'tracked'}]: tracked False = no fingerprint of the last received copy."""
 
-    def __init__(self, text, files):
+    def __init__(self, text, files, kept=()):
         super().__init__(text)
         self.files = files
+        self.kept = list(kept)                        # locked files the ZIP also carries, as the old copy: not replaced, listed so the person sees them
 
 
 # ---- Locks: files and folders the person works on can be locked so a dropped ZIP does not replace them. The lock list and the fingerprints of what the drops delivered are
@@ -706,7 +707,7 @@ def install_zip(zip_path, project, allow=None):
     kept, asked, writable = judge_holds(project, plan, zip_path)
     if asked and allow is None:
         raise HeldFiles('These locked files are in the ZIP with a copy that is not the stale one (or Zygote has no fingerprint of the last copy):\n  ' +
-                        '\n  '.join(one['rel'] for one in asked), asked)
+                        '\n  '.join(one['rel'] for one in asked), asked, kept)
     allowed = set(allow or ())
     overridden = [one['rel'] for one in asked if one['rel'] in allowed]
     kept = kept + [one['rel'] for one in asked if one['rel'] not in allowed]
